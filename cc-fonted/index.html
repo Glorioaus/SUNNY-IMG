@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUNNY - 粒子汇聚</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #00ff88;
+            --secondary-color: #00ccff;
+            --accent-color: #ff00ff;
+            --bg-color: #0a0a0a;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+        }
+
+        body {
+            font-family: 'Rajdhani', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .background {
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(0, 204, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 40% 40%, rgba(255, 0, 255, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .grid-overlay {
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0, 255, 136, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: 0;
+            animation: gridMove 20s linear infinite;
+        }
+
+        @keyframes gridMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 50px 50px; }
+        }
+
+        #particle-container {
+            position: fixed;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            z-index: 1;
+            perspective: 1000px;
+        }
+
+        .particle {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            object-fit: cover;
+            cursor: pointer;
+            transform-style: preserve-3d;
+            transition: transform 0.3s ease, filter 0.3s ease, box-shadow 0.3s ease;
+            filter: brightness(0.8);
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+            will-change: transform, left, top;
+        }
+
+        .particle:hover {
+            transform: scale(1.5) rotateY(180deg);
+            filter: brightness(1.2);
+            z-index: 10;
+            box-shadow: 0 0 20px var(--primary-color);
+        }
+
+        #title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: clamp(3rem, 15vw, 12rem);
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-align: center;
+            opacity: 0;
+            transform: translateY(50px) rotateX(-20deg);
+            animation: titleAppear 1.5s ease-out 3s forwards;
+            position: relative;
+            z-index: 2;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+
+        #title.highlight {
+            animation: titlePulse 2s ease-in-out 4s infinite;
+        }
+
+        @keyframes titlePulse {
+            0%, 100% {
+                filter: brightness(1) drop-shadow(0 0 20px var(--primary-color));
+            }
+            50% {
+                filter: brightness(1.5) drop-shadow(0 0 40px var(--primary-color));
+            }
+        }
+
+        @keyframes titleAppear {
+            to {
+                opacity: 0.05;
+                transform: translateY(0) rotateX(0);
+            }
+        }
+
+        .info-panel {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 16px;
+            padding: 1rem 2rem;
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+
+        .convergence-indicator {
+            position: fixed;
+            top: 2rem;
+            left: 2rem;
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            z-index: 10;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--primary-color);
+        }
+
+        .info-panel:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 8px 32px rgba(0, 255, 136, 0.1);
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .info-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .loader {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+
+        .loader-bar {
+            width: 100px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .loader-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .loader-text {
+            text-align: center;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .controls {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            z-index: 10;
+        }
+
+        .control-btn {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 12px;
+            padding: 0.75rem 1.5rem;
+            color: var(--text-primary);
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .control-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: -1;
+        }
+
+        .control-btn:hover::before {
+            opacity: 1;
+        }
+
+        .control-btn:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+            transform: translateY(-2px);
+        }
+
+        @media (max-width: 768px) {
+            .info-panel {
+                bottom: 1rem;
+                gap: 1rem;
+                padding: 0.75rem 1.5rem;
+            }
+
+            .info-value {
+                font-size: 1rem;
+            }
+
+            .controls {
+                top: 1rem;
+                right: 1rem;
+                gap: 0.5rem;
+            }
+
+            .control-btn {
+                padding: 0.5rem 1rem;
+                font-size: 0.75rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="background"></div>
+    <div class="grid-overlay"></div>
+
+    <div class="loader" id="loader">
+        <div class="loader-bar">
+            <div class="loader-progress" id="progress"></div>
+        </div>
+        <div class="loader-text" id="loader-text">Loading particles...</div>
+    </div>
+
+    <div id="particle-container"></div>
+    <h1 id="title">SUNNY</h1>
+
+    <div class="convergence-indicator" id="convergence-indicator">
+        Status: Loading
+    </div>
+
+    <div class="info-panel">
+        <div class="info-item">
+            <span class="info-label">Particles</span>
+            <span class="info-value" id="particle-count">0</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Status</span>
+            <span class="info-value" id="status">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">FPS</span>
+            <span class="info-value" id="fps">0</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="control-btn" id="reset-btn">Reset Animation</button>
+        <button class="control-btn" id="shuffle-btn">Shuffle Particles</button>
+        <button class="control-btn" id="pause-btn">Pause</button>
+    </div>
+
+    <script>
+        const CONFIG = {
+            backendUrl: 'http://localhost:3000',
+            particleSize: 20,
+            moveSpeed: 0.5,
+            waveIntensity: 20,
+            convergeDuration: 3000,
+            waveFrequency: 0.02,
+            trailOpacity: 0.5,
+            requiredParticles: 200 // 确保有足够的粒子组成清晰的SUNNY字样
+        };
+
+        let particles = [];
+        let imageUrls = [];
+        let isConverging = false;
+        let isPaused = false;
+        let animationId = null;
+        let startTime = null;
+        let fps = 0;
+        let frameCount = 0;
+        let fpsStartTime = performance.now();
+        let convergenceComplete = false;
+
+        const container = document.getElementById('particle-container');
+        const loader = document.getElementById('loader');
+        const progress = document.getElementById('progress');
+        const loaderText = document.getElementById('loader-text');
+        const particleCount = document.getElementById('particle-count');
+        const statusElement = document.getElementById('status');
+        const fpsElement = document.getElementById('fps');
+        const resetBtn = document.getElementById('reset-btn');
+        const shuffleBtn = document.getElementById('shuffle-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+
+        class Particle {
+            constructor(id, x, y, img) {
+                this.id = id;
+                this.x = x;
+                this.y = y;
+                this.targetX = x;
+                this.targetY = y;
+                this.vx = (Math.random() - 0.5) * CONFIG.moveSpeed;
+                this.vy = (Math.random() - 0.5) * CONFIG.moveSpeed;
+                this.wavePhase = Math.random() * Math.PI * 2;
+                this.img = img;
+                this.element = this.createDOMElement();
+                this.convergenceProgress = 0;
+                this.originalX = x;
+                this.originalY = y;
+            }
+
+            createDOMElement() {
+                const img = document.createElement('img');
+                img.src = this.img;
+                img.className = 'particle';
+                img.style.width = `${CONFIG.particleSize}px`;
+                img.style.height = `${CONFIG.particleSize}px`;
+                img.style.left = `${this.x}px`;
+                img.style.top = `${this.y}px`;
+                img.style.borderRadius = '50%';
+                img.style.pointerEvents = 'auto';
+                img.addEventListener('click', () => this.handleClick());
+                return img;
+            }
+
+            handleClick() {
+                this.wavePhase = Math.random() * Math.PI * 2;
+                this.vx = (Math.random() - 0.5) * CONFIG.moveSpeed * 2;
+                this.vy = (Math.random() - 0.5) * CONFIG.moveSpeed * 2;
+                this.element.style.transform = 'scale(1.2)';
+                setTimeout(() => {
+                    this.element.style.transform = 'scale(1)';
+                }, 200);
+            }
+
+            update(time) {
+                if (isPaused) return;
+
+                if (isConverging) {
+                    const progress = Math.min(1, this.convergenceProgress + 0.02);
+                    this.convergenceProgress = progress;
+
+                    // 加速汇聚效果
+                    const speed = 0.1 * Math.sin(progress * Math.PI / 2);
+
+                    this.x += (this.targetX - this.x) * speed;
+                    this.y += (this.targetY - this.y) * speed;
+
+                    // 添加目标吸引力
+                    const dx = this.targetX - this.x;
+                    const dy = this.targetY - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance > 50) {
+                        // 远距粒子加速
+                        this.x += dx * 0.005;
+                        this.y += dy * 0.005;
+                    }
+
+                    // 更新粒子外观
+                    this.updateAppearance(progress);
+                } else {
+                    this.wavePhase += CONFIG.waveFrequency;
+                    const waveX = Math.sin(this.wavePhase) * CONFIG.waveIntensity;
+                    const waveY = Math.cos(this.wavePhase * 0.8) * CONFIG.waveIntensity;
+
+                    this.x += this.vx + waveX * 0.1;
+                    this.y += this.vy + waveY * 0.1;
+
+                    if (this.x <= 0 || this.x >= window.innerWidth - CONFIG.particleSize) {
+                        this.vx *= -1;
+                        this.x = Math.max(0, Math.min(this.x, window.innerWidth - CONFIG.particleSize));
+                    }
+                    if (this.y <= 0 || this.y >= window.innerHeight - CONFIG.particleSize) {
+                        this.vy *= -1;
+                        this.y = Math.max(0, Math.min(this.y, window.innerHeight - CONFIG.particleSize));
+                    }
+
+                    // 重置粒子外观
+                    this.updateAppearance(0);
+                }
+
+                this.element.style.left = `${this.x}px`;
+                this.element.style.top = `${this.y}px`;
+            }
+
+            updateAppearance(progress) {
+                const scale = 0.8 + 0.4 * progress;
+                const brightness = 0.8 + 0.4 * progress;
+
+                this.element.style.transform = `scale(${scale})`;
+                this.element.style.filter = `brightness(${brightness})`;
+
+                // 完成汇聚时添加发光效果
+                if (progress > 0.9) {
+                    this.element.style.boxShadow = '0 0 20px var(--primary-color)';
+                } else {
+                    this.element.style.boxShadow = '0 0 10px rgba(0, 255, 136, 0.5)';
+                }
+            }
+        }
+
+        function init() {
+            loadImages();
+            setupEventListeners();
+            requestAnimationFrame(update);
+        }
+
+        async function loadImages() {
+            try {
+                // 从后端获取图片列表
+                const response = await fetch(`${CONFIG.backendUrl}/api/images`);
+                const data = await response.json();
+
+                let availableImages = data.images.map(img => img.url);
+
+                // 如果图片数量不足，循环使用
+                if (availableImages.length < CONFIG.requiredParticles) {
+                    const multipliedImages = [];
+                    while (multipliedImages.length < CONFIG.requiredParticles) {
+                        multipliedImages.push(...availableImages);
+                    }
+                    availableImages = multipliedImages.slice(0, CONFIG.requiredParticles);
+                    console.log(`Image count insufficient, repeating images to reach ${CONFIG.requiredParticles} particles`);
+                }
+
+                imageUrls = availableImages;
+                const imageCount = Math.min(imageUrls.length, CONFIG.requiredParticles);
+
+                let loadedCount = 0;
+                loaderText.textContent = `Fetching images...`;
+
+                for (let i = 0; i < imageCount; i++) {
+                    try {
+                        const img = await loadImage(imageUrls[i]);
+                        const particle = new Particle(i, Math.random() * (window.innerWidth - CONFIG.particleSize),
+                            Math.random() * (window.innerHeight - CONFIG.particleSize), img);
+                        particles.push(particle);
+                        container.appendChild(particle.element);
+                        loadedCount++;
+                    } catch (error) {
+                        console.error('Image load failed:', error);
+                    }
+
+                    const progressPercent = Math.round((loadedCount / imageCount) * 100);
+                    progress.style.width = `${progressPercent}%`;
+                    loaderText.textContent = `Loading particles... ${progressPercent}%`;
+                    particleCount.textContent = loadedCount;
+                }
+
+                setTimeout(() => {
+                    loader.style.opacity = '0';
+                    loader.style.pointerEvents = 'none';
+                    statusElement.textContent = 'Complete';
+                }, 500);
+
+                setTimeout(() => {
+                    setParticleTargets();
+                }, 1000);
+
+                setTimeout(() => {
+                    isConverging = true;
+                    statusElement.textContent = 'Converging';
+                }, 2000);
+            } catch (error) {
+                console.error('Failed to fetch images from backend:', error);
+                loaderText.textContent = 'Backend error, using fallback images';
+                setTimeout(() => {
+                    loadFallbackImages();
+                }, 1000);
+            }
+        }
+
+        async function loadFallbackImages() {
+            let fallbackImages = Array.from({ length: 50 }, (_, i) =>
+                `https://source.unsplash.com/random/200x200?sig=${i}&nature`
+            );
+
+            // 如果图片数量不足，循环使用
+            if (fallbackImages.length < CONFIG.requiredParticles) {
+                const multipliedImages = [];
+                while (multipliedImages.length < CONFIG.requiredParticles) {
+                    multipliedImages.push(...fallbackImages);
+                }
+                fallbackImages = multipliedImages.slice(0, CONFIG.requiredParticles);
+            }
+
+            let loadedCount = 0;
+
+            for (let i = 0; i < fallbackImages.length; i++) {
+                try {
+                    const img = await loadImage(fallbackImages[i]);
+                    const particle = new Particle(i, Math.random() * (window.innerWidth - CONFIG.particleSize),
+                        Math.random() * (window.innerHeight - CONFIG.particleSize), img);
+                    particles.push(particle);
+                    container.appendChild(particle.element);
+                    loadedCount++;
+                } catch (error) {
+                    console.error('Fallback image load failed:', error);
+                }
+
+                const progressPercent = Math.round((loadedCount / fallbackImages.length) * 100);
+                progress.style.width = `${progressPercent}%`;
+                loaderText.textContent = `Loading fallback images... ${progressPercent}%`;
+                particleCount.textContent = loadedCount;
+            }
+
+            setTimeout(() => {
+                loader.style.opacity = '0';
+                loader.style.pointerEvents = 'none';
+                statusElement.textContent = 'Complete (fallback)';
+            }, 500);
+
+            setTimeout(() => {
+                setParticleTargets();
+            }, 1000);
+
+            setTimeout(() => {
+                isConverging = true;
+                statusElement.textContent = 'Converging';
+                document.getElementById('title').classList.add('highlight');
+            }, 2000);
+        }
+
+        function loadImage(url) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => resolve(img.src);
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        function setParticleTargets() {
+            const title = document.getElementById('title');
+            const rect = title.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            // 创建 SUNNY 字样的粒子位置
+            const letterPositions = generateSUNNYPositions(centerX, centerY, rect.width);
+
+            // 将粒子均匀分配到字母位置
+            particles.forEach((particle, index) => {
+                const letterIndex = index % letterPositions.length;
+                particle.targetX = letterPositions[letterIndex].x;
+                particle.targetY = letterPositions[letterIndex].y;
+            });
+        }
+
+        function generateSUNNYPositions(centerX, centerY, width) {
+            const letterWidth = width / 5;
+            const letterHeight = letterWidth * 0.8;
+            const dotSpacing = Math.min(letterWidth / 15, 20); // 最小15px间距
+            const positions = [];
+
+            function addLetterParticles(letterIndex, letterDefinition) {
+                const startX = centerX - width / 2 + letterIndex * letterWidth + letterWidth / 2;
+                const startY = centerY;
+
+                letterDefinition.forEach((row, rowIndex) => {
+                    row.forEach((dot, colIndex) => {
+                        if (dot) {
+                            const x = startX + (colIndex - 7) * dotSpacing;
+                            const y = startY + (rowIndex - 7) * dotSpacing;
+                            positions.push({ x, y });
+                        }
+                    });
+                });
+            }
+
+            // 使用更密集的15x15点阵
+            const letterS = [
+                [1,1,1,1,1,0,0,0,0,0,1,1,1,1,1],
+                [1,1,0,0,0,0,0,0,0,0,0,0,0,1,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,1,1,1,1,1,0,0,0,0,0,1],
+                [1,0,0,1,1,1,1,1,1,1,0,0,0,0,1],
+                [1,0,1,1,1,0,0,0,1,1,1,0,0,0,1],
+                [1,1,1,0,0,0,0,0,0,1,1,1,0,0,1],
+                [1,1,0,0,0,0,0,0,0,0,1,1,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,1,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,1,1,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,1,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,1,0,0,0,0,0,0,0,0,0,0,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+            ];
+
+            const letterU = [
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+            ];
+
+            const letterN = [
+                [1,1,1,1,1,0,0,0,0,0,0,0,0,1,1],
+                [1,1,1,1,1,0,0,0,0,0,0,0,0,1,1],
+                [1,1,0,0,0,1,1,1,1,1,1,0,0,1,1],
+                [1,1,0,0,0,0,1,1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,0,0,1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,0,1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,0,1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,0,1,1,0,0,0,0,1,1],
+                [1,1,0,0,0,0,1,1,1,1,0,0,0,1,1],
+                [1,1,0,0,0,1,1,1,1,1,1,0,0,1,1],
+                [1,1,0,0,1,1,1,1,1,1,1,1,0,1,1],
+                [1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+            ];
+
+            const letterY = [
+                [1,1,1,1,1,0,0,0,0,0,0,1,1,1,1],
+                [0,1,1,1,1,0,0,0,0,0,1,1,1,1,0],
+                [0,0,1,1,1,0,0,0,0,1,1,1,1,0,0],
+                [0,0,0,1,1,0,0,0,1,1,1,1,0,0,0],
+                [0,0,0,0,1,0,0,1,1,1,1,0,0,0,0],
+                [0,0,0,0,0,0,1,1,1,1,0,0,0,0,0],
+                [0,0,0,0,0,1,1,1,1,0,0,0,0,0,0],
+                [0,0,0,0,1,1,1,1,0,0,0,0,0,0,0],
+                [0,0,0,1,1,1,1,0,0,0,0,0,0,0,0],
+                [0,0,1,1,1,1,0,0,0,0,0,0,0,0,0],
+                [0,1,1,1,0,0,0,0,0,0,0,0,0,0,0],
+                [1,1,1,0,0,0,0,0,0,0,0,0,0,0,0],
+                [1,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ];
+
+            // 为每个字母添加粒子
+            addLetterParticles(0, letterS);
+            addLetterParticles(1, letterU);
+            addLetterParticles(2, letterN);
+            addLetterParticles(3, letterN);
+            addLetterParticles(4, letterY);
+
+            return positions;
+        }
+
+        function checkConvergence() {
+            if (!isConverging) return false;
+
+            const totalParticles = particles.length;
+            if (totalParticles === 0) return false;
+
+            const convergedParticles = particles.filter(p => {
+                const dx = p.targetX - p.x;
+                const dy = p.targetY - p.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                return distance < 5; // 5像素内视为已汇聚
+            });
+
+            const convergenceRate = convergedParticles.length / totalParticles;
+            const progress = Math.round(convergenceRate * 100);
+
+            const indicator = document.getElementById('convergence-indicator');
+            indicator.textContent = `Status: Converging ${progress}%`;
+
+            if (convergenceRate > 0.95 && !convergenceComplete) {
+                // 95%以上粒子已汇聚
+                statusElement.textContent = 'Complete';
+                indicator.textContent = 'Status: Complete';
+                convergenceComplete = true;
+
+                // 添加完成动画
+                particles.forEach((particle, index) => {
+                    setTimeout(() => {
+                        particle.element.style.transform = 'scale(1.2)';
+                        setTimeout(() => {
+                            particle.element.style.transform = 'scale(1)';
+                        }, 200);
+                    }, index * 10);
+                });
+
+                return true;
+            }
+
+            statusElement.textContent = `Converging: ${progress}%`;
+            return false;
+        }
+
+        function highlightTextOnConvergence() {
+            const title = document.getElementById('title');
+            const convergenceRate = calculateConvergenceProgress();
+
+            const opacity = 0.1 + 0.9 * convergenceRate;
+            const glowSize = 10 * convergenceRate;
+
+            title.style.opacity = opacity;
+            title.style.filter = `drop-shadow(0 0 ${glowSize}px var(--primary-color))`;
+        }
+
+        function calculateConvergenceProgress() {
+            if (particles.length === 0) return 0;
+
+            const totalDistance = particles.reduce((sum, p) => {
+                const dx = p.targetX - p.x;
+                const dy = p.targetY - p.y;
+                return sum + Math.sqrt(dx * dx + dy * dy);
+            }, 0);
+
+            const avgDistance = totalDistance / particles.length;
+            const maxPossibleDistance = Math.sqrt(window.innerWidth ** 2 + window.innerHeight ** 2);
+
+            return Math.max(0, Math.min(1, 1 - avgDistance / maxPossibleDistance));
+        }
+
+        function update(time) {
+            if (!startTime) startTime = time;
+            frameCount++;
+
+            if (time - fpsStartTime >= 1000) {
+                fps = frameCount;
+                frameCount = 0;
+                fpsStartTime = time;
+                fpsElement.textContent = fps;
+            }
+
+            particles.forEach(particle => particle.update(time));
+
+            // 检查汇聚进度
+            if (isConverging) {
+                highlightTextOnConvergence();
+                checkConvergence();
+            }
+
+            animationId = requestAnimationFrame(update);
+        }
+
+        function resetAnimation() {
+            isConverging = false;
+            convergenceComplete = false;
+
+            particles.forEach(particle => {
+                particle.convergenceProgress = 0;
+                particle.x = Math.random() * (window.innerWidth - CONFIG.particleSize);
+                particle.y = Math.random() * (window.innerHeight - CONFIG.particleSize);
+                particle.vx = (Math.random() - 0.5) * CONFIG.moveSpeed;
+                particle.vy = (Math.random() - 0.5) * CONFIG.moveSpeed;
+                particle.originalX = particle.x;
+                particle.originalY = particle.y;
+            });
+
+            statusElement.textContent = 'Moving';
+            const indicator = document.getElementById('convergence-indicator');
+            indicator.textContent = 'Status: Moving';
+
+            const title = document.getElementById('title');
+            title.classList.remove('highlight');
+            title.style.opacity = '0';
+            title.style.filter = 'drop-shadow(0 0 0px var(--primary-color))';
+
+            setTimeout(() => {
+                setParticleTargets();
+                isConverging = true;
+                statusElement.textContent = 'Converging';
+                indicator.textContent = 'Status: Converging';
+                title.classList.add('highlight');
+            }, 1000);
+        }
+
+        function shuffleParticles() {
+            isConverging = false;
+            particles.forEach(particle => {
+                particle.targetX = Math.random() * (window.innerWidth - CONFIG.particleSize);
+                particle.targetY = Math.random() * (window.innerHeight - CONFIG.particleSize);
+                particle.convergenceProgress = 0;
+            });
+            statusElement.textContent = 'Shuffling';
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+            statusElement.textContent = isPaused ? 'Paused' : (isConverging ? 'Converging' : 'Moving');
+        }
+
+        function setupEventListeners() {
+            resetBtn.addEventListener('click', resetAnimation);
+            shuffleBtn.addEventListener('click', shuffleParticles);
+            pauseBtn.addEventListener('click', togglePause);
+
+            window.addEventListener('resize', () => {
+                particles.forEach(particle => {
+                    particle.x = Math.min(particle.x, window.innerWidth - CONFIG.particleSize);
+                    particle.y = Math.min(particle.y, window.innerHeight - CONFIG.particleSize);
+                });
+                setParticleTargets(); // 更新目标位置
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
