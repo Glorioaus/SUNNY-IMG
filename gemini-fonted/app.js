@@ -1,6 +1,8 @@
-// SUNNY Digital Swarm
-// Built with PixiJS + GSAP
-// 2026
+/**
+ * SUNNY Digital Swarm - "Solar Birth" Version
+ * Built with PixiJS + GSAP
+ * 2026
+ */
 
 console.clear();
 
@@ -8,44 +10,67 @@ console.clear();
  * 核心配置
  */
 const CONFIG = {
-    totalParticles: 100, // 与下载的图片数量一致
+    totalParticles: 1000, // 目标头像总数
+    dustCount: 2000,      // 金色尘埃数量
     text: "SUNNY",
-    fontFamily: "Times New Roman", // 经典且有衬线，更具设计感
-    fontSize: 240,
+    fontFamily: "Montserrat, sans-serif",
+    fontSize: 240,       // 稍微增大字体以容纳更多粒子
     fontWeight: "900",
-    api: "http://localhost:3000/api/images", // Node Backend
-    colors: [0xffd700, 0xffa500, 0xff8c00, 0xfffacd], // Sunny Gold Palette
-    particleSize: 32, // 初始大小
-    particleScale: 0.15, // 图片缩放比例
-    swaySpeed: 0.002, // 漂浮速度
-    swayRange: 20, // 漂浮范围
+    api: "http://localhost:3000/api/images",
+    colors: {
+        gold: 0xFFD700,
+        white: 0xFFFFFF,
+        accent: 0xFFA500,
+        dust: [0xFFD700, 0xFFA500, 0xFF8C00]
+    },
+    particleSize: 28,   // 缩小尺寸，1000个粒子需要更细腻
+    dustSize: 1.5,
+    flowSpeed: 0.08,    // 规模大时，稍微加快流动速度更壮观
+    noiseScale: 0.004
+};
+
+/**
+ * 简易噪声函数实现 (避免引入额外库)
+ */
+const Noise = {
+    perlin2(x, y) {
+        return (Math.sin(x) + Math.sin(y) + Math.sin(x + y)) / 3;
+    }
 };
 
 /**
  * 应用主类
  */
 class SunnySwarm {
+    /**
+     * @constructor
+     * 初始化应用状态
+     */
     constructor() {
         this.app = null;
-        this.particles = [];
-        this.targetPoints = [];
-        this.isLoading = true;
+        this.particles = [];    // 存储头像粒子
+        this.dust = [];         // 存储尘埃粒子
+        this.targetPoints = []; // 文字采样点 (头像)
+        this.dustTargets = [];  // 文字采样点 (尘埃)
         this.isConverged = false;
+        this.isLoaded = false;
         
         this.loader = {
             loadedCount: 0,
-            total: CONFIG.totalParticles,
-            images: []
+            total: CONFIG.totalParticles
         };
+
+        this.mouse = { x: 0, y: 0, active: false };
 
         this.init();
     }
 
+    /**
+     * 初始化 PixiJS 和基本事件
+     */
     async init() {
-        // 1. 初始化 Pixi 应用
-        // Pixi v7+ 推荐写法
         this.app = new PIXI.Application({
-            backgroundColor: 0x0f0f13, // 使用十六进制数值更安全
+            backgroundAlpha: 0, // 背景透明，使用 CSS 背景
             resizeTo: window,
             antialias: true,
             resolution: window.devicePixelRatio || 1,
@@ -53,332 +78,322 @@ class SunnySwarm {
         });
         document.getElementById('app-container').appendChild(this.app.view);
 
-        // 2. 添加交互监听
+        // 交互监听
         this.app.view.addEventListener('click', () => this.toggleState());
+        window.addEventListener('mousemove', (e) => {
+            this.mouse.x = e.clientX;
+            this.mouse.y = e.clientY;
+            this.mouse.active = true;
+        });
         window.addEventListener('resize', () => this.handleResize());
-        
-        // 3. 开始加载流程
+
+        // 开始加载流程
+        await document.fonts.ready; // 确保字体加载完成
+        this.calculateTextTargets();
         await this.loadImages();
+        
+        // 启动主循环
+        this.app.ticker.add((delta) => this.update(delta));
     }
 
     /**
-     * 加载图片资源
+     * 顺序加载图片并触发“一图多发”的飞入动画
      */
     async loadImages() {
         try {
-            // 请求后端获取图片列表
             const response = await fetch(CONFIG.api);
-            if (!response.ok) throw new Error('Network response was not ok');
+            if (!response.ok) throw new Error('API offline');
             const data = await response.json();
-            const imageUrls = data.images.slice(0, CONFIG.totalParticles); // 确保只取前100张
+            const sourceImages = data.images;
+            const uniqueCount = sourceImages.length;
+            
+            // 计算每个纹理需要生成多少个粒子
+            const particlesPerTexture = Math.ceil(CONFIG.totalParticles / uniqueCount);
 
-            this.loader.total = imageUrls.length;
-            this.targetPoints = []; // Reset points
-            
-            // 逐个加载纹理
-            // 使用 Promise.allSettled 确保部分失败不影响整体
-            const promises = imageUrls.map((imgData, index) => {
-                 return PIXI.Assets.load(imgData.url)
-                    .then(texture => {
-                        this.loader.loadedCount++;
-                        this.updateProgress();
-                        this.spawnParticle(texture, index);
-                        return texture;
-                    })
-                    .catch(err => {
-                        console.warn(`Failed to load image ${imgData.id}`, err);
-                        // 即使失败也增加计数，并在最后检查是否需要降级
-                        this.loader.loadedCount++;
-                        this.updateProgress();
-                        // 返回一个占位符纹理
-                        return this.createPlaceholderTexture();
-                    });
-            });
-
-            const results = await Promise.allSettled(promises);
-            
-            // 检查是否有加载成功的，如果没有则启用降级
-            const successCount = results.filter(r => r.status === 'fulfilled' && r.value instanceof PIXI.Texture).length;
-            
-            if (successCount === 0) {
-                 console.warn("No images loaded successfully, using fallback.");
-                 this.generateFallbackParticles();
-            } else {
-                 setTimeout(() => this.onAllLoaded(), 500);
+            // 逐个加载原始纹理
+            for (let i = 0; i < uniqueCount; i++) {
+                const imgData = sourceImages[i];
+                PIXI.Assets.load(imgData.url).then(texture => {
+                    // 每加载一个母版，生成多个粒子
+                    for (let j = 0; j < particlesPerTexture; j++) {
+                        if (this.particles.length < CONFIG.totalParticles) {
+                            this.spawnAvatar(texture, this.particles.length);
+                        }
+                    }
+                    this.loader.loadedCount++;
+                    this.updateProgress(uniqueCount);
+                    
+                    if (this.loader.loadedCount === uniqueCount) {
+                        this.onAllLoaded();
+                    }
+                }).catch(() => {
+                    this.loader.loadedCount++;
+                    this.updateProgress(uniqueCount);
+                });
+                
+                // 稍微错峰，保持流星感
+                await new Promise(r => setTimeout(r, 50));
             }
 
+            // 生成辅助尘埃粒子
+            this.generateDust();
+
         } catch (error) {
-            console.error("Backend offline or error:", error);
-            // 降级方案：生成占位色块
-            this.generateFallbackParticles();
+            console.error("Backend Error, using fallback:", error);
+            this.generateFallback();
         }
     }
 
-    createPlaceholderTexture() {
-        const graphics = new PIXI.Graphics();
-        graphics.beginFill(0xFFD700);
-        graphics.drawCircle(0, 0, 16);
-        graphics.endFill();
-        return this.app.renderer.generateTexture(graphics);
-    }
-
     /**
-     * 更新加载进度条
+     * 更新加载进度条 (基于母版图片数量)
      */
-    updateProgress() {
-        const percent = (this.loader.loadedCount / this.loader.total) * 100;
+    updateProgress(totalUnique) {
+        const percent = (this.loader.loadedCount / totalUnique) * 100;
         const fill = document.getElementById('progress-fill');
         if (fill) fill.style.width = `${percent}%`;
     }
 
     /**
-     * 生成单个粒子 (Sprite)
+     * 生成头像粒子 (带圆形遮罩、金边和深度感)
      */
-    spawnParticle(texture, index) {
-        const sprite = new PIXI.Sprite(texture);
+    spawnAvatar(texture, index) {
+        const container = new PIXI.Container();
         
-        // 设置初始属性
+        // 1. 创建头像 Sprite
+        const sprite = new PIXI.Sprite(texture);
         sprite.anchor.set(0.5);
         
-        // 计算合适的缩放比例 (基于原图大小 200x200)
-        // 目标是让粒子看起来约 30-40px 大小
-        const scale = 40 / texture.width; 
-        sprite.scale.set(0); // 初始大小为0，通过动画弹出
+        // 引入随机尺寸和深度感
+        const baseScale = CONFIG.particleSize / texture.width;
+        const randomScale = baseScale * (0.8 + Math.random() * 0.4); 
+        sprite.scale.set(randomScale);
 
-        // 随机初始位置 (全屏散布)
-        sprite.x = Math.random() * this.app.screen.width;
-        sprite.y = Math.random() * this.app.screen.height;
+        // 2. 创建圆形遮罩
+        const mask = new PIXI.Graphics();
+        mask.beginFill(0xffffff);
+        mask.drawCircle(0, 0, (texture.width * randomScale) / 2);
+        mask.endFill();
+        container.addChild(mask);
+        sprite.mask = mask;
 
-        // 随机旋转
-        sprite.rotation = Math.random() * Math.PI * 2;
+        // 3. 创建金色边框 (粗细随深度变化)
+        const border = new PIXI.Graphics();
+        const thickness = 1 + Math.random();
+        border.lineStyle(thickness, CONFIG.colors.gold, 0.8);
+        border.drawCircle(0, 0, (texture.width * randomScale) / 2);
+        
+        container.addChild(sprite);
+        container.addChild(border);
 
-        // 添加自定义属性用于动画
-        sprite.userData = {
-            id: index,
-            originX: sprite.x,
-            originY: sprite.y,
-            vx: (Math.random() - 0.5) * 2, // 漂浮速度 X
-            vy: (Math.random() - 0.5) * 2, // 漂浮速度 Y
-            phase: Math.random() * Math.PI * 2, // 波动相位
-            rotSpeed: (Math.random() - 0.5) * 0.02 // 自转速度
+        // 初始位置：屏幕边缘
+        const side = Math.floor(Math.random() * 4);
+        let startX, startY;
+        const offset = 100;
+        if (side === 0) { startX = -offset; startY = Math.random() * window.innerHeight; }
+        else if (side === 1) { startX = window.innerWidth + offset; startY = Math.random() * window.innerHeight; }
+        else if (side === 2) { startX = Math.random() * window.innerWidth; startY = -offset; }
+        else { startX = Math.random() * window.innerWidth; startY = window.innerHeight + offset; }
+
+        container.x = startX;
+        container.y = startY;
+        container.alpha = 0;
+
+        // 增加色彩分级 (微弱的金色/橙色调)
+        if (Math.random() > 0.7) {
+            container.tint = CONFIG.colors.dust[Math.floor(Math.random() * CONFIG.colors.dust.length)];
+        }
+
+        container.userData = {
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6,
+            noiseOffset: Math.random() * 1000,
+            index: index,
+            type: 'avatar',
+            baseScale: randomScale,
+            depth: Math.random() // 用于后续可能的层级效果
         };
 
-        // 存入容器
-        this.app.stage.addChild(sprite);
-        this.particles.push(sprite);
+        this.app.stage.addChild(container);
+        this.particles.push(container);
 
-        // 入场动画 (Pop in)
-        gsap.to(sprite.scale, {
-            x: scale,
-            y: scale,
-            duration: 0.6,
-            ease: "back.out(1.7)",
-            delay: Math.random() * 0.5 // 错峰出现
+        // 飞入动画 (错峰更明显)
+        gsap.to(container, {
+            x: window.innerWidth / 2 + (Math.random() - 0.5) * 600,
+            y: window.innerHeight / 2 + (Math.random() - 0.5) * 400,
+            alpha: 0.4 + Math.random() * 0.6,
+            duration: 1.5 + Math.random(),
+            ease: "expo.out",
+            delay: Math.random() * 0.5
         });
-
-        // 立即开始漂浮
-        // 注意：这里不使用 Ticker 绑定每个粒子，而是统一在主循环更新，性能更好
     }
 
     /**
-     * 降级方案：无后端或图片加载失败时
+     * 生成金色尘埃粒子
      */
-    generateFallbackParticles() {
-        // 创建一个简单的圆形纹理
-        const graphics = new PIXI.Graphics();
-        graphics.beginFill(0xFFD700);
-        graphics.drawCircle(0, 0, 20);
-        graphics.endFill();
-        const texture = this.app.renderer.generateTexture(graphics);
+    generateDust() {
+        for (let i = 0; i < CONFIG.dustCount; i++) {
+            const dust = new PIXI.Graphics();
+            const color = CONFIG.colors.dust[Math.floor(Math.random() * CONFIG.colors.dust.length)];
+            dust.beginFill(color, 0.6);
+            dust.drawCircle(0, 0, Math.random() * 2 + 1);
+            dust.endFill();
 
-        for (let i = 0; i < CONFIG.totalParticles; i++) {
-            this.spawnParticle(texture, i);
+            dust.x = Math.random() * window.innerWidth;
+            dust.y = Math.random() * window.innerHeight;
+            dust.alpha = 0;
+
+            dust.userData = {
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                noiseOffset: Math.random() * 1000,
+                type: 'dust'
+            };
+
+            this.app.stage.addChild(dust);
+            this.dust.push(dust);
+
+            gsap.to(dust, { alpha: 1, duration: 2, delay: Math.random() * 2 });
         }
-        
-        this.onAllLoaded();
     }
 
     /**
-     * 所有资源加载完毕
-     */
-    onAllLoaded() {
-        this.isLoading = false;
-        
-        // 隐藏加载层
-        gsap.to("#loader", { opacity: 0, duration: 0.8, onComplete: () => {
-            document.getElementById('loader').style.display = 'none';
-        }});
-        
-        // 显示提示
-        document.getElementById('controls').classList.add('visible');
-
-        // 计算文字目标点
-        this.calculateTextTargets();
-
-        // 启动主循环 (用于处理 Chaos 阶段的物理运动)
-        this.app.ticker.add((delta) => this.update(delta));
-
-        // 自动进入汇聚阶段 (延迟2秒)
-        setTimeout(() => {
-            this.converge();
-        }, 2000);
-    }
-
-    /**
-     * 计算文字形状的目标点
+     * 采样文字坐标点
      */
     calculateTextTargets() {
-        if (!this.app || !this.app.screen || this.app.screen.width === 0) {
-            console.warn("Screen dimensions not ready for text sampling");
-            return;
-        }
+        const w = window.innerWidth || 1920;
+        const h = window.innerHeight || 1080;
+        
+        if (w === 0 || h === 0) return;
 
-        const width = this.app.screen.width;
-        const height = this.app.screen.height;
-
-        console.log(`Sampling text targets on ${width}x${height} canvas...`);
-
-        // 创建离屏 Canvas
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = w;
+        canvas.height = h;
 
-        // 绘制文字 - 使用更安全的系统字体确保立即可用
-        // 增大字体大小以确保有足够的像素点
-        const safeFontSize = Math.min(width * 0.25, 300); 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `${CONFIG.fontWeight} ${safeFontSize}px Arial, sans-serif`; 
+        ctx.fillStyle = 'white';
+        ctx.font = `900 ${CONFIG.fontSize}px ${CONFIG.fontFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(CONFIG.text, width / 2, height / 2);
+        ctx.fillText(CONFIG.text, w / 2, h / 2);
 
-        // 获取像素数据
-        const imageData = ctx.getImageData(0, 0, width, height).data;
-        const potentialPoints = [];
+        const data = ctx.getImageData(0, 0, w, h).data;
+        const points = [];
 
-        // 扫描像素 (步长为4以提高性能)
-        for (let y = 0; y < height; y += 6) { // 稍微增加步长，减少计算量
-            for (let x = 0; x < width; x += 6) {
-                const alpha = imageData[(y * width + x) * 4 + 3];
-                if (alpha > 128) {
-                    potentialPoints.push({ x, y });
+        // 密集采样 (步长减小以增加精度)
+        const step = 4;
+        for (let y = 0; y < h; y += step) {
+            for (let x = 0; x < w; x += step) {
+                if (data[(y * w + x) * 4 + 3] > 128) {
+                    points.push({ x, y });
                 }
             }
         }
 
-        console.log(`Found ${potentialPoints.length} potential points for text.`);
+        // 随机打乱
+        for (let i = points.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [points[i], points[j]] = [points[j], points[i]];
+        }
 
-        // 随机选取 N 个点作为目标，确保数量匹配粒子数
+        // 分配目标点 (使用模运算循环取点，确保 1000 个粒子都有位置)
         this.targetPoints = [];
-        if (potentialPoints.length > 0) {
-            // 打乱数组
-            for (let i = potentialPoints.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [potentialPoints[i], potentialPoints[j]] = [potentialPoints[j], potentialPoints[i]];
-            }
-            
-            // 取前 N 个
-            for (let i = 0; i < this.particles.length; i++) {
-                // 必须深拷贝点对象，否则引用可能会出问题
-                const pt = potentialPoints[i % potentialPoints.length];
-                this.targetPoints.push({ x: pt.x, y: pt.y });
-            }
-        } else {
-            console.error("Failed to sample any text points! Font might not be rendered.");
-            // 降级：如果找不到点，让它们汇聚到屏幕中心
-            const cx = width / 2;
-            const cy = height / 2;
-            for (let i = 0; i < this.particles.length; i++) {
-                this.targetPoints.push({ 
-                    x: cx + (Math.random() - 0.5) * 200, 
-                    y: cy + (Math.random() - 0.5) * 100 
-                });
-            }
+        for (let i = 0; i < CONFIG.totalParticles; i++) {
+            this.targetPoints.push(points[i % points.length]);
+        }
+
+        this.dustTargets = [];
+        for (let i = 0; i < CONFIG.dustCount; i++) {
+            this.dustTargets.push(points[(i + CONFIG.totalParticles) % points.length]);
         }
     }
 
     /**
-     * 每一帧的更新逻辑
+     * 每一帧的更新逻辑 (流场模拟)
      */
     update(delta) {
-        // 如果已经汇聚，停止物理模拟，节省性能
-        // 或者只保留微弱的震动
-        if (this.isConverged) {
-             this.particles.forEach(p => {
-                 // 汇聚后添加微弱的呼吸感
-                 p.rotation += 0.001 * delta;
-             });
-             return; 
-        }
+        if (this.isConverged) return;
 
-        // 混沌阶段：布朗运动 + 边界反弹
-        this.particles.forEach(p => {
-            p.x += p.userData.vx * delta;
-            p.y += p.userData.vy * delta;
-            p.rotation += p.userData.rotSpeed * delta;
+        const time = Date.now() * 0.001;
+        const allParticles = [...this.particles, ...this.dust];
 
-            // 边界检测
-            if (p.x < 0 || p.x > this.app.screen.width) p.userData.vx *= -1;
-            if (p.y < 0 || p.y > this.app.screen.height) p.userData.vy *= -1;
+        allParticles.forEach(p => {
+            const ud = p.userData;
+            
+            // 流场受噪声影响
+            const angle = Noise.perlin2(p.x * CONFIG.noiseScale, p.y * CONFIG.noiseScale + time) * Math.PI * 4;
+            const fx = Math.cos(angle) * CONFIG.flowSpeed;
+            const fy = Math.sin(angle) * CONFIG.flowSpeed;
+
+            ud.vx += fx;
+            ud.vy += fy;
+
+            // 摩擦力
+            ud.vx *= 0.98;
+            ud.vy *= 0.98;
+
+            p.x += ud.vx * delta;
+            p.y += ud.vy * delta;
+
+            // 边界反弹
+            if (p.x < 0 || p.x > window.innerWidth) ud.vx *= -1;
+            if (p.y < 0 || p.y > window.innerHeight) ud.vy *= -1;
+
+            // 鼠标互动：避让
+            if (this.mouse.active) {
+                const dx = p.x - this.mouse.x;
+                const dy = p.y - this.mouse.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 150) {
+                    const force = (150 - dist) / 150;
+                    ud.vx += (dx / dist) * force * 2;
+                    ud.vy += (dy / dist) * force * 2;
+                }
+            }
         });
     }
 
     /**
-     * 触发汇聚动画 (核心逻辑)
+     * 触发汇聚动画
      */
     converge() {
         if (this.isConverged) return;
-        
-        // 安全检查：如果目标点还没算好，重新算一次
-        if (!this.targetPoints || this.targetPoints.length === 0) {
-            console.log("Targets not ready, recalculating...");
-            this.calculateTextTargets();
-        }
-
-        if (this.targetPoints.length === 0) {
-            console.warn("Aborting converge: No target points found.");
-            return;
-        }
-
         this.isConverged = true;
-        console.log("Swarm converging to", this.targetPoints.length, "points...");
 
-        // 使用 GSAP 接管位置控制
+        // 头像汇聚 (使用更快的缓动和 Stagger)
         this.particles.forEach((p, i) => {
             const target = this.targetPoints[i];
-            if (!target) return;
-
-            // 计算目标缩放
-            const targetScale = (40 / p.texture.width) * 0.8;
-
-            // 1. 飞向目标
             gsap.to(p, {
                 x: target.x,
                 y: target.y,
-                rotation: 0, 
-                duration: 1.5 + Math.random(), 
-                ease: "power3.inOut",
-                delay: Math.random() * 0.3,
+                alpha: 1,
+                duration: 2,
+                ease: "power4.inOut",
+                delay: (i / CONFIG.totalParticles) * 0.5 // 按照索引顺序丝滑飞入
             });
-
-            // 修正：分开动画 scale.x 和 scale.y
-            gsap.to(p.scale, {
-                x: targetScale,
-                y: targetScale,
-                duration: 1.5 + Math.random(),
-                ease: "power3.inOut",
-                delay: Math.random() * 0.3,
+            // 汇聚时稍微缩小，增加精致感
+            gsap.to(p.scale, { 
+                x: p.userData.baseScale * 0.85, 
+                y: p.userData.baseScale * 0.85, 
+                duration: 2 
             });
-
-            // 2. 颜色滤镜
-            p.tint = CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)];
         });
-        
-        // 更新 UI
-        const ctrl = document.getElementById('controls');
-        if (ctrl) ctrl.innerText = "CLICK TO DISPERSE";
+
+        // 尘埃汇聚
+        this.dust.forEach((p, i) => {
+            const target = this.dustTargets[i];
+            gsap.to(p, {
+                x: target.x,
+                y: target.y,
+                alpha: 0.6,
+                duration: 2.5,
+                ease: "power3.inOut",
+                delay: Math.random() * 1
+            });
+        });
+
+        // 隐藏加载进度
+        gsap.to("#loader", { opacity: 0, duration: 1 });
+        document.getElementById('controls').innerText = "CLICK TO DISPERSE";
     }
 
     /**
@@ -388,97 +403,76 @@ class SunnySwarm {
         if (!this.isConverged) return;
         this.isConverged = false;
 
-        console.log("Swarm dispersing...");
-
-        this.particles.forEach(p => {
-            const targetX = Math.random() * this.app.screen.width;
-            const targetY = Math.random() * this.app.screen.height;
-            const originalScale = 40 / p.texture.width;
-
+        const allParticles = [...this.particles, ...this.dust];
+        allParticles.forEach((p, i) => {
+            const targetX = Math.random() * window.innerWidth;
+            const targetY = Math.random() * window.innerHeight;
+            
             gsap.to(p, {
                 x: targetX,
                 y: targetY,
-                rotation: Math.random() * Math.PI * 2,
-                duration: 1.2,
+                alpha: p.userData.type === 'avatar' ? 0.8 : 0.4,
+                duration: 1.5,
                 ease: "expo.out",
+                delay: (i / allParticles.length) * 0.2,
                 onComplete: () => {
-                    p.userData.vx = (Math.random() - 0.5) * 2;
-                    p.userData.vy = (Math.random() - 0.5) * 2;
+                    p.userData.vx = (Math.random() - 0.5) * 8;
+                    p.userData.vy = (Math.random() - 0.5) * 8;
                 }
             });
 
-            // 修正：分开动画 scale.x 和 scale.y
-            gsap.to(p.scale, {
-                x: originalScale,
-                y: originalScale,
-                duration: 1.2,
-                ease: "expo.out",
-            });
-            
-            p.tint = 0xFFFFFF;
+            if (p.userData.type === 'avatar') {
+                gsap.to(p.scale, { x: p.userData.baseScale, y: p.userData.baseScale, duration: 1 });
+            }
         });
-        
-        const ctrl = document.getElementById('controls');
-        if (ctrl) ctrl.innerText = "CLICK TO CONVERGE";
+
+        gsap.to("#loader", { opacity: 1, duration: 1 });
+        document.getElementById('controls').innerText = "CLICK TO CONVERGE";
+    }
+
+    toggleState() {
+        if (this.isConverged) this.disperse();
+        else this.converge();
+    }
+
+    onAllLoaded() {
+        this.isLoaded = true;
+        // 显示提示
+        document.getElementById('controls').classList.add('visible');
+        // 自动汇聚
+        setTimeout(() => this.converge(), 1000);
     }
 
     /**
-     * 状态切换
+     * 降级方案：无后端或图片加载失败时
      */
-    toggleState() {
-        if (this.isLoading) return;
-        
+    generateFallback() {
+        const texture = this.createPlaceholderTexture();
+        for (let i = 0; i < CONFIG.totalParticles; i++) {
+            this.spawnAvatar(texture, i);
+        }
+        this.onAllLoaded();
+    }
+
+    handleResize() {
+        this.app.renderer.resize(window.innerWidth, window.innerHeight);
+        this.calculateTextTargets();
         if (this.isConverged) {
-            this.disperse();
-        } else {
+            this.isConverged = false;
             this.converge();
         }
     }
 
-    /**
-     * 窗口大小调整
-     */
-    handleResize() {
-        if (!this.app || !this.app.screen) return;
-
-        // 重新计算文字目标点
-        this.calculateTextTargets();
-        
-        // 如果当前是汇聚状态，需要更新粒子位置
-        if (this.isConverged) {
-            this.particles.forEach((p, i) => {
-                const target = this.targetPoints[i];
-                if (target) {
-                    gsap.to(p, {
-                        x: target.x,
-                        y: target.y,
-                        duration: 0.5,
-                        ease: "power2.out"
-                    });
-                }
-            });
-        }
-    }
-
-    /**
-     * 创建简单的占位纹理
-     */
     createPlaceholderTexture() {
-        const graphics = new PIXI.Graphics();
-        graphics.beginFill(0xFFD700);
-        graphics.drawCircle(0, 0, 16);
-        graphics.endFill();
-        return this.app.renderer.generateTexture(graphics);
+        const g = new PIXI.Graphics();
+        g.beginFill(CONFIG.colors.gold);
+        g.drawCircle(0, 0, 50);
+        g.endFill();
+        return this.app.renderer.generateTexture(g);
     }
 }
 
-// 启动应用
+// 启动
 window.onload = () => {
-    // 确保 PIXI 和 GSAP 已加载
-    if (typeof PIXI === 'undefined' || typeof gsap === 'undefined') {
-        console.error('Dependencies not loaded. Retrying in 100ms...');
-        setTimeout(window.onload, 100);
-        return;
-    }
     new SunnySwarm();
 };
