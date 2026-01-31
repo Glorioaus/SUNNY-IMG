@@ -132,10 +132,10 @@ const CONFIG = {
     dustCount: 1500,          // 尘埃粒子数量
     text: "SUNNY",            // 要拼成的文字
     fontSize: 280,            // 文字大小
-    
+
     imagesFolder: "./imgs/",  // 图片文件夹路径
     imageExtension: ".jpg",   // 图片扩展名
-    
+
     signatureAPI: {
         mode: "websocket",    // 连接模式
         websocketUrl: "ws://localhost:3000/signatures",
@@ -143,10 +143,10 @@ const CONFIG = {
         pollingInterval: 1000,
         mockDelay: 2000
     },
-    
+
     particleSize: 32,         // 头像尺寸
     flowSpeed: 0.06,          // 流场速度
-    
+
     animation: {
         signatureHighlight: 0.8,  // 签名高亮时长（秒）
         flyToPosition: 2.0,       // 飞向目标时长（秒）

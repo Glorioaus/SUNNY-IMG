@@ -1,73 +1,73 @@
 /**
  * SUNNY 签名墙后端服务器
  * 支持WebSocket和HTTP轮询两种方式
- * 
+ *
  * 安装依赖:
  * npm install express ws cors
- * 
+ *
  * 运行:
  * node server.js
  */
 
-const express = require('express');
-const WebSocket = require('ws');
-const cors = require('cors');
-const http = require('http');
+const express = require('express')
+const WebSocket = require('ws')
+const cors = require('cors')
+const http = require('http')
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: '/signatures' });
+const app = express()
+const server = http.createServer(app)
+const wss = new WebSocket.Server({ server, path: '/signatures' })
 
 // 中间件
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public')); // 如果你想托管静态文件
+app.use(cors())
+app.use(express.json())
+app.use(express.static('public')) // 如果你想托管静态文件
 
 // 签名数据存储
-const signatures = [];
-let signatureIdCounter = 1;
+const signatures = []
+let signatureIdCounter = 1
 
 // WebSocket连接处理
-wss.on('connection', (ws) => {
-    console.log('[WebSocket] 新连接建立');
-    
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            console.log('[WebSocket] 收到消息:', data);
-            
-            // 处理各种消息类型
-            if (data.type === 'ping') {
-                ws.send(JSON.stringify({ type: 'pong' }));
-            }
-        } catch (error) {
-            console.error('[WebSocket] 消息解析错误:', error);
-        }
-    });
-    
-    ws.on('close', () => {
-        console.log('[WebSocket] 连接关闭');
-    });
-    
-    ws.on('error', (error) => {
-        console.error('[WebSocket] 错误:', error);
-    });
-});
+wss.on('connection', ws => {
+  console.log('[WebSocket] 新连接建立')
+
+  ws.on('message', message => {
+    try {
+      const data = JSON.parse(message)
+      console.log('[WebSocket] 收到消息:', data)
+
+      // 处理各种消息类型
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }))
+      }
+    } catch (error) {
+      console.error('[WebSocket] 消息解析错误:', error)
+    }
+  })
+
+  ws.on('close', () => {
+    console.log('[WebSocket] 连接关闭')
+  })
+
+  ws.on('error', error => {
+    console.error('[WebSocket] 错误:', error)
+  })
+})
 
 // 广播签名事件到所有WebSocket客户端
-function broadcastSignature(employeeId, timestamp) {
-    const message = JSON.stringify({
-        employeeId,
-        timestamp: timestamp || Date.now()
-    });
-    
-    wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-        }
-    });
-    
-    console.log(`[Broadcast] 签名事件已广播: ${employeeId}`);
+function broadcastSignature (employeeId, timestamp) {
+  const message = JSON.stringify({
+    employeeId,
+    timestamp: timestamp || Date.now()
+  })
+
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message)
+    }
+  })
+
+  console.log(`[Broadcast] 签名事件已广播: ${employeeId}`)
 }
 
 /**
@@ -76,183 +76,180 @@ function broadcastSignature(employeeId, timestamp) {
 
 // 接收签名（供外部系统调用）
 app.post('/api/signature', (req, res) => {
-    const { employeeId } = req.body;
-    
-    if (!employeeId) {
-        return res.status(400).json({ error: '缺少employeeId' });
-    }
-    
-    // 检查是否已存在
-    const exists = signatures.find(s => s.employeeId === employeeId);
-    if (exists) {
-        return res.status(409).json({ error: '该员工已签名' });
-    }
-    
-    const signature = {
-        id: signatureIdCounter++,
-        employeeId,
-        timestamp: Date.now()
-    };
-    
-    signatures.push(signature);
-    
-    // 广播到所有WebSocket客户端
-    broadcastSignature(employeeId, signature.timestamp);
-    
-    res.json({
-        success: true,
-        signature
-    });
-    
-    console.log(`[API] 新签名: ${employeeId}`);
-});
+  const { employeeId } = req.body
+
+  if (!employeeId) {
+    return res.status(400).json({ error: '缺少employeeId' })
+  }
+
+  // 检查是否已存在
+  const exists = signatures.find(s => s.employeeId === employeeId)
+  if (exists) {
+    return res.status(409).json({ error: '该员工已签名' })
+  }
+
+  const signature = {
+    id: signatureIdCounter++,
+    employeeId,
+    timestamp: Date.now()
+  }
+
+  signatures.push(signature)
+
+  // 广播到所有WebSocket客户端
+  broadcastSignature(employeeId, signature.timestamp)
+
+  res.json({
+    success: true,
+    signature
+  })
+
+  console.log(`[API] 新签名: ${employeeId}`)
+})
 
 // 批量接收签名
 app.post('/api/signatures/batch', (req, res) => {
-    const { employeeIds } = req.body;
-    
-    if (!Array.isArray(employeeIds)) {
-        return res.status(400).json({ error: 'employeeIds必须是数组' });
+  const { employeeIds } = req.body
+
+  if (!Array.isArray(employeeIds)) {
+    return res.status(400).json({ error: 'employeeIds必须是数组' })
+  }
+
+  const newSignatures = []
+
+  employeeIds.forEach(employeeId => {
+    const exists = signatures.find(s => s.employeeId === employeeId)
+    if (!exists) {
+      const signature = {
+        id: signatureIdCounter++,
+        employeeId,
+        timestamp: Date.now()
+      }
+      signatures.push(signature)
+      newSignatures.push(signature)
+
+      // 广播
+      broadcastSignature(employeeId, signature.timestamp)
     }
-    
-    const newSignatures = [];
-    
-    employeeIds.forEach(employeeId => {
-        const exists = signatures.find(s => s.employeeId === employeeId);
-        if (!exists) {
-            const signature = {
-                id: signatureIdCounter++,
-                employeeId,
-                timestamp: Date.now()
-            };
-            signatures.push(signature);
-            newSignatures.push(signature);
-            
-            // 广播
-            broadcastSignature(employeeId, signature.timestamp);
-        }
-    });
-    
-    res.json({
-        success: true,
-        count: newSignatures.length,
-        signatures: newSignatures
-    });
-    
-    console.log(`[API] 批量签名: ${newSignatures.length}个`);
-});
+  })
+
+  res.json({
+    success: true,
+    count: newSignatures.length,
+    signatures: newSignatures
+  })
+
+  console.log(`[API] 批量签名: ${newSignatures.length}个`)
+})
 
 // 轮询接口：获取新签名
 app.get('/api/signatures', (req, res) => {
-    const since = parseInt(req.query.since) || 0;
-    
-    const newSignatures = signatures.filter(s => s.id > since);
-    
-    res.json({
-        signatures: newSignatures,
-        total: signatures.length
-    });
-});
+  const since = parseInt(req.query.since) || 0
+
+  const newSignatures = signatures.filter(s => s.id > since)
+
+  res.json({
+    signatures: newSignatures,
+    total: signatures.length
+  })
+})
 
 // 获取所有签名
 app.get('/api/signatures/all', (req, res) => {
-    res.json({
-        signatures,
-        total: signatures.length
-    });
-});
+  res.json({
+    signatures,
+    total: signatures.length
+  })
+})
 
 // 重置所有签名（用于测试）
 app.post('/api/signatures/reset', (req, res) => {
-    signatures.length = 0;
-    signatureIdCounter = 1;
-    
-    // 广播重置消息
-    wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'reset' }));
-        }
-    });
-    
-    res.json({ success: true, message: '已重置所有签名' });
-    console.log('[API] 签名数据已重置');
-});
+  signatures.length = 0
+  signatureIdCounter = 1
+
+  // 广播重置消息
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'reset' }))
+    }
+  })
+
+  res.json({ success: true, message: '已重置所有签名' })
+  console.log('[API] 签名数据已重置')
+})
 
 // 健康检查
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        signatures: signatures.length,
-        connections: wss.clients.size
-    });
-});
+  res.json({
+    status: 'ok',
+    signatures: signatures.length,
+    connections: wss.clients.size
+  })
+})
 
 /**
  * 测试工具：模拟随机签名
  */
-let mockInterval = null;
+let mockInterval = null
 
 app.post('/api/test/start-mock', (req, res) => {
-    if (mockInterval) {
-        return res.json({ message: '模拟已在运行中' });
+  if (mockInterval) {
+    return res.json({ message: '模拟已在运行中' })
+  }
+
+  const employeeIds = Array.from({ length: 300 }, (_, i) => `${105001 + i}`)
+
+  // 随机打乱
+  for (let i = employeeIds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[employeeIds[i], employeeIds[j]] = [employeeIds[j], employeeIds[i]]
+  }
+
+  let index = 0
+  mockInterval = setInterval(() => {
+    if (index >= employeeIds.length) {
+      clearInterval(mockInterval)
+      mockInterval = null
+      console.log('[Mock] 所有签名完成')
+      return
     }
-    
-    const employeeIds = Array.from(
-        { length: 300 }, 
-        (_, i) => `${105001 + i}`
-    );
-    
-    // 随机打乱
-    for (let i = employeeIds.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [employeeIds[i], employeeIds[j]] = [employeeIds[j], employeeIds[i]];
+
+    const employeeId = employeeIds[index]
+    const signature = {
+      id: signatureIdCounter++,
+      employeeId,
+      timestamp: Date.now()
     }
-    
-    let index = 0;
-    mockInterval = setInterval(() => {
-        if (index >= employeeIds.length) {
-            clearInterval(mockInterval);
-            mockInterval = null;
-            console.log('[Mock] 所有签名完成');
-            return;
-        }
-        
-        const employeeId = employeeIds[index];
-        const signature = {
-            id: signatureIdCounter++,
-            employeeId,
-            timestamp: Date.now()
-        };
-        signatures.push(signature);
-        broadcastSignature(employeeId, signature.timestamp);
-        
-        index++;
-    }, 2000); // 每2秒一个签名
-    
-    res.json({ 
-        success: true, 
-        message: '模拟签名已启动',
-        totalEmployees: employeeIds.length
-    });
-    
-    console.log('[Mock] 开始模拟签名');
-});
+    signatures.push(signature)
+    broadcastSignature(employeeId, signature.timestamp)
+
+    index++
+  }, 2000) // 每2秒一个签名
+
+  res.json({
+    success: true,
+    message: '模拟签名已启动',
+    totalEmployees: employeeIds.length
+  })
+
+  console.log('[Mock] 开始模拟签名')
+})
 
 app.post('/api/test/stop-mock', (req, res) => {
-    if (mockInterval) {
-        clearInterval(mockInterval);
-        mockInterval = null;
-        res.json({ success: true, message: '模拟签名已停止' });
-        console.log('[Mock] 停止模拟签名');
-    } else {
-        res.json({ message: '没有正在运行的模拟' });
-    }
-});
+  if (mockInterval) {
+    clearInterval(mockInterval)
+    mockInterval = null
+    res.json({ success: true, message: '模拟签名已停止' })
+    console.log('[Mock] 停止模拟签名')
+  } else {
+    res.json({ message: '没有正在运行的模拟' })
+  }
+})
 
 // 启动服务器
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000
 server.listen(PORT, () => {
-    console.log(`
+  console.log(`
 ╔════════════════════════════════════════════╗
 ║   SUNNY 签名墙服务器已启动                  ║
 ║   端口: ${PORT}                              ║
@@ -264,7 +261,7 @@ API端点:
   GET  /api/signatures         - 轮询获取签名
   GET  /api/signatures/all     - 获取所有签名
   POST /api/signatures/reset   - 重置签名
-  
+
   POST /api/test/start-mock    - 启动模拟签名
   POST /api/test/stop-mock     - 停止模拟签名
 
@@ -275,7 +272,7 @@ WebSocket:
   curl -X POST http://localhost:${PORT}/api/signature \\
     -H "Content-Type: application/json" \\
     -d '{"employeeId": "105001"}'
-    
+
   curl -X POST http://localhost:${PORT}/api/test/start-mock
-    `);
-});
+    `)
+})
