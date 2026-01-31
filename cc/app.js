@@ -1,809 +1,784 @@
 /**
- * SUNNY Digital Swarm - "Signature Wall" Version
- * 誓师大会实时签名墙
- * Built with PixiJS + GSAP
- * 2026
+ * SUNNY Signature Wall
+ * 誓师大会签名墙 - 修复版
+ * 2026-01-31
+ *
+ * 设计思路：头像 + 粒子作为一个整体，共同组成 Logo 和 SUNNY 字样。
+ * 粒子的作用是填补头像数量不足带来的密度空缺。
+ *
+ * 阶段流程:
+ *   INTRO_TO_LOGO  →  头像+粒子一起从屏幕外飞入，组成 Logo
+ *   FREE_FLOAT     →  头像+粒子在流场中漂流，签名事件逐个触发
+ *   CONVERGE_TO_SUNNY → 头像+粒子一起飞向 SUNNY 字样位置
  */
 
 console.clear();
 
-/**
- * 核心配置
- */
 const CONFIG = {
-    totalEmployees: 300,      // 员工总数
-    dustCount: 1500,          // 金色尘埃数量
-    text: "SUNNY",
+    totalEmployees: 300,
+
+    sunnyText: "SUNNY",
+    introLogoPath: "/logo.png",
     fontFamily: "Montserrat, sans-serif",
-    fontSize: 280,            // 1920x1080固定尺寸
     fontWeight: "900",
-    
-    // 图片路径配置
-    imagesFolder: "./imgs/",  // 本地图片文件夹
-    imageExtension: ".jpg",   // 图片扩展名
-    
-    // 签名事件接口（支持多种方式）
-    signatureAPI: {
-        mode: "websocket",    // 可选: "websocket" | "polling" | "mock"
-        websocketUrl: "ws://localhost:3000/signatures",
-        pollingUrl: "http://localhost:3000/api/signatures",
-        pollingInterval: 1000, // 轮询间隔(ms)
-        mockDelay: 2000       // mock模式下的签名间隔
-    },
-    
+    noiseScale: 0.0018,
+    flowStrength: 0.06,
+    flowTimeScale: 0.25,
+    flowEps: 0.015,
+    flowJitter: 0.01,
+    flowFriction: 0.985,
+    flowMaxSpeed: 1.6,
+    flowWrapMargin: 60,
+    imagesFolder: "/imgs/",
+    imageExtension: ".jpg",
+
+    // 头像尺寸。300个头像 + 2500个粒子 共同填充图案。
+    // 头像 22px，粒子半径 3px，这样粒子能填进头像间隙而不会把头像盖住。
+    avatarSize: 22,
+    dustCount: 2500,
+
     colors: {
-        gold: 0xFFD700,
-        white: 0xFFFFFF,
-        accent: 0xFFA500,
-        dust: [0xFFD700, 0xFFA500, 0xFF8C00],
-        highlight: 0xFFFF00,  // 签名高亮色
-        signed: 0x00FF00      // 已签名标记色
+        gold:      0xFFD700,
+        highlight: 0x00BFFF,
+        signed:    0x00BFFF,
     },
-    
-    particleSize: 32,        // 头像基础尺寸
-    dustSize: 1.5,
-    flowSpeed: 0.06,
-    noiseScale: 0.004,
-    
-    // 动画时长配置
-    animation: {
-        signatureHighlight: 0.8,  // 签名放大时长
-        flyToPosition: 2.0,       // 飞向目标时长
-        queueDelay: 150          // 签名队列处理间隔
+
+    scheduler: {
+        maxConcurrent:     20,
+        highlightDuration: 0.8,
+    },
+
+    api: {
+        socket:    `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/signatures`,
+        employees: "/api/employees"
     }
 };
 
-/**
- * 简易噪声函数
- */
+// ─── 简易噪声 ───────────────────────────────
 const Noise = {
     perlin2(x, y) {
-        return (Math.sin(x * 1.5) + Math.sin(y * 1.5) + Math.sin(x + y)) / 3;
+        return (Math.sin(x) + Math.sin(y) + Math.sin(x + y)) / 3;
     }
 };
 
-/**
- * 签名事件监听器
- */
-class SignatureListener {
-    constructor(onSignature) {
-        this.onSignature = onSignature;
-        this.mode = CONFIG.signatureAPI.mode;
-        this.connection = null;
-        this.pollingTimer = null;
-        this.lastSignatureId = 0;
-        
-        this.init();
+// ─── 签名队列调度 ─────────────────────────────
+class SignatureScheduler {
+    constructor(wall) {
+        this.wall = wall;
+        this.queue = [];
+        this.processing = new Set();
+        this.isConverging = false;
     }
-    
-    init() {
-        console.log(`[SignatureListener] 初始化模式: ${this.mode}`);
-        
-        switch (this.mode) {
-            case "websocket":
-                this.initWebSocket();
-                break;
-            case "polling":
-                this.initPolling();
-                break;
-            case "mock":
-                this.initMock();
-                break;
-            default:
-                console.warn("未知的签名监听模式，使用mock");
-                this.initMock();
-        }
+
+    push(employeeId) {
+        if (this.isConverging) return;
+        if (this.processing.has(employeeId)) return;
+        if (this.wall.signedIds.has(employeeId)) return;
+        this.queue.push(employeeId);
+        this.process();
     }
-    
-    initWebSocket() {
-        try {
-            this.connection = new WebSocket(CONFIG.signatureAPI.websocketUrl);
-            
-            this.connection.onopen = () => {
-                console.log("[WebSocket] 连接成功");
-                this.updateStatus("已连接签名服务器");
-            };
-            
-            this.connection.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.employeeId) {
-                        console.log(`[WebSocket] 收到签名: ${data.employeeId}`);
-                        this.onSignature(data.employeeId, data.timestamp);
-                    }
-                } catch (error) {
-                    console.error("[WebSocket] 解析消息失败:", error);
-                }
-            };
-            
-            this.connection.onerror = (error) => {
-                console.error("[WebSocket] 连接错误:", error);
-                this.updateStatus("签名服务器连接失败，切换到Mock模式");
-                this.mode = "mock";
-                this.initMock();
-            };
-            
-            this.connection.onclose = () => {
-                console.log("[WebSocket] 连接关闭");
-                this.updateStatus("签名服务器断开");
-            };
-        } catch (error) {
-            console.error("[WebSocket] 初始化失败:", error);
-            this.mode = "mock";
-            this.initMock();
-        }
-    }
-    
-    initPolling() {
-        console.log("[Polling] 启动轮询");
-        this.updateStatus("轮询模式");
-        
-        this.pollingTimer = setInterval(async () => {
-            try {
-                const response = await fetch(
-                    `${CONFIG.signatureAPI.pollingUrl}?since=${this.lastSignatureId}`
-                );
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.signatures && data.signatures.length > 0) {
-                        data.signatures.forEach(sig => {
-                            this.onSignature(sig.employeeId, sig.timestamp);
-                            this.lastSignatureId = Math.max(this.lastSignatureId, sig.id);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error("[Polling] 请求失败:", error);
-            }
-        }, CONFIG.signatureAPI.pollingInterval);
-    }
-    
-    initMock() {
-        console.log("[Mock] 启动模拟签名模式");
-        this.updateStatus("演示模式 - 自动签名");
-        
-        // 生成300个工号的模拟列表
-        const employeeIds = Array.from(
-            { length: CONFIG.totalEmployees }, 
-            (_, i) => `${105001 + i}`
-        );
-        
-        // 随机打乱顺序
-        for (let i = employeeIds.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [employeeIds[i], employeeIds[j]] = [employeeIds[j], employeeIds[i]];
-        }
-        
-        let index = 0;
-        const mockInterval = setInterval(() => {
-            if (index >= employeeIds.length) {
-                clearInterval(mockInterval);
-                console.log("[Mock] 所有员工已签名");
-                return;
-            }
-            
-            this.onSignature(employeeIds[index], Date.now());
-            index++;
-        }, CONFIG.signatureAPI.mockDelay);
-    }
-    
-    updateStatus(message) {
-        const statusEl = document.getElementById('connection-status');
-        if (statusEl) {
-            statusEl.textContent = message;
-        }
-    }
-    
-    disconnect() {
-        if (this.connection) {
-            this.connection.close();
-        }
-        if (this.pollingTimer) {
-            clearInterval(this.pollingTimer);
-        }
+
+    process() {
+        if (this.wall.phase !== 'FREE_FLOAT') return;
+        if (this.queue.length === 0) return;
+        if (this.processing.size >= CONFIG.scheduler.maxConcurrent) return;
+
+        const id = this.queue.shift();
+        this.processing.add(id);
+
+        const rushMode = this.queue.length > 5;
+        const duration = rushMode ? 0.3 : CONFIG.scheduler.highlightDuration;
+
+        this.wall.animateSignature(id, duration, () => {
+            this.processing.delete(id);
+            this.process();
+        });
+        this.process(); // 尽量填满并发槽
     }
 }
 
-/**
- * 主应用类
- */
+// ─── 签名墙主类 ────────────────────────────────
 class SignatureWall {
     constructor() {
         this.app = null;
-        
-        // 员工数据
-        this.employees = [];           // 员工列表
-        this.particleMap = new Map();  // employeeId -> particle对象
-        this.positionMap = new Map();  // employeeId -> {x, y}坐标
-        this.signedSet = new Set();    // 已签名员工ID集合
-        this.signatureQueue = [];      // 签名动画队列
-        
-        // 粒子系统
-        this.particles = [];           // 所有头像粒子
-        this.dust = [];               // 尘埃粒子
-        this.targetPoints = [];       // SUNNY文字采样点
-        
-        // 状态
-        this.isProcessingSignature = false;
-        this.isAllSigned = false;
-        this.loadedCount = 0;
-        
-        // 交互
-        this.mouse = { x: 0, y: 0, active: false };
-        
+        this.scheduler = new SignatureScheduler(this);
+        this.employees = [];
+
+        this.particles     = new Map();   // id → Graphics（头像）
+        this.dustParticles = [];          // Sprite[]（粒子）
+
+        // 目标坐标 — Logo 和 SUNNY 各一组，头像和粒子各自的
+        this.logoAvatarTargets = [];
+        this.logoDustTargets   = [];
+        this.sunnyAvatarTargets = [];
+        this.sunnyDustTargets   = [];
+
+        this.resizeTimer = null;
+        this.phase       = 'INTRO_TO_LOGO';
+        this.logoImage   = null;
+
+        // intro 阶段用倒计数决定"全部到位后"何时切换状态
+        this.introAvatarRemaining = 0;
+        this.introDustRemaining   = 0;
+
+        this.signedIds   = new Set();
+        this.isConverged = false;
+
+        this.layers = { dust: null, avatar: null, active: null };
+
         this.init();
     }
-    
-    /**
-     * 初始化应用
-     */
+
+    // ─── 画头像圆 ─────────────────────────────
+    redrawAvatarGraphic(g, borderStyle) {
+        const ud      = g.userData;
+        const size    = ud.targetSize;
+        const texture = ud.texture;
+
+        g.clear();
+
+        const s      = size / texture.width;
+        const matrix = new PIXI.Matrix();
+        matrix.scale(s, s);
+        matrix.translate(-size / 2, -size / 2);
+
+        g.beginTextureFill({ texture, matrix });
+        g.drawCircle(0, 0, size / 2);
+        g.endFill();
+
+        const bw = borderStyle?.width  ?? ud.border.width;
+        const bc = borderStyle?.color  ?? ud.border.color;
+        const ba = borderStyle?.alpha  ?? ud.border.alpha;
+        g.lineStyle(bw, bc, ba);
+        g.drawCircle(0, 0, size / 2);
+
+        ud.border = { width: bw, color: bc, alpha: ba };
+    }
+
+    // ─── 初始化 ───────────────────────────────
     async init() {
-        // 创建PixiJS应用
+        const container = document.getElementById('app-container');
+        container.innerHTML = '';
         this.app = new PIXI.Application({
             backgroundAlpha: 0,
-            width: 1920,
-            height: 1080,
+            resizeTo: window,
+            width:   window.innerWidth,
+            height:  window.innerHeight,
             antialias: true,
             resolution: window.devicePixelRatio || 1,
-            autoDensity: true,
+            autoDensity: true
         });
-        
         document.getElementById('app-container').appendChild(this.app.view);
-        
-        // 交互监听
-        window.addEventListener('mousemove', (e) => {
-            this.mouse.x = e.clientX;
-            this.mouse.y = e.clientY;
-            this.mouse.active = true;
-        });
-        
-        // 等待字体加载
+
+        this.createLayers();
+        this.initEvents();
+
         await document.fonts.ready;
-        
-        // 初始化流程
-        this.calculateTextTargets();
-        this.generateEmployeeList();
-        await this.loadAllAvatars();
-        this.assignPositions();
-        this.generateDust();
-        
-        // 启动签名监听
-        this.signatureListener = new SignatureListener(
-            (employeeId, timestamp) => this.onSignatureReceived(employeeId, timestamp)
-        );
-        
-        // 启动主循环
+        await this.loadEmployeeData();
+        await this.loadLogoImage();
+
+        // ★ 先算好全部目标坐标，再创建头像和粒子
+        this.calculateCompositionTargets();
+
+        await this.createAvatars();   // 头像飞入 Logo
+        this.createDust();            // 粒子飞入 Logo
+
+        this.connectSocket();
         this.app.ticker.add((delta) => this.update(delta));
-        
-        console.log("[SignatureWall] 初始化完成");
+
+        console.log("☀️ SUNNY Signature Wall Ready.");
     }
-    
-    /**
-     * 生成员工列表 (105001-105300)
-     */
-    generateEmployeeList() {
-        for (let i = 0; i < CONFIG.totalEmployees; i++) {
-            const employeeId = `${105001 + i}`;
-            this.employees.push({
-                id: employeeId,
-                imagePath: `${CONFIG.imagesFolder}${employeeId}${CONFIG.imageExtension}`,
-                signed: false,
-                signedAt: null
-            });
-        }
-        console.log(`[EmployeeList] 生成${this.employees.length}个员工`);
-    }
-    
-    /**
-     * 批量加载所有头像
-     */
-    async loadAllAvatars() {
-        console.log("[LoadAvatars] 开始加载头像...");
-        
-        const loadPromises = this.employees.map((employee, index) => {
-            return this.loadSingleAvatar(employee, index);
-        });
-        
-        await Promise.all(loadPromises);
-        
-        console.log(`[LoadAvatars] 加载完成: ${this.loadedCount}/${CONFIG.totalEmployees}`);
-        this.onAllLoaded();
-    }
-    
-    /**
-     * 加载单个头像
-     */
-    async loadSingleAvatar(employee, index) {
+
+    async loadLogoImage() {
         try {
-            const texture = await PIXI.Assets.load(employee.imagePath);
-            this.spawnAvatar(texture, employee.id, index);
-            this.loadedCount++;
-            this.updateProgress();
-        } catch (error) {
-            console.warn(`[LoadAvatar] 加载失败: ${employee.id}`, error);
-            // 使用占位符
-            const placeholderTexture = this.createPlaceholderTexture(employee.id);
-            this.spawnAvatar(placeholderTexture, employee.id, index);
-            this.loadedCount++;
-            this.updateProgress();
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            await new Promise((res, rej) => {
+                img.onload  = res;
+                img.onerror = () => rej();
+                img.src = CONFIG.introLogoPath;
+            });
+            this.logoImage = img;
+        } catch {
+            console.warn('[Logo] 加载失败，用文字替代');
+            this.logoImage = null;
         }
     }
-    
-    /**
-     * 创建头像粒子
-     */
-    spawnAvatar(texture, employeeId, index) {
-        const container = new PIXI.Container();
-        
-        // 1. 创建头像Sprite
-        const sprite = new PIXI.Sprite(texture);
-        sprite.anchor.set(0.5);
-        
-        const baseScale = CONFIG.particleSize / texture.width;
-        const randomScale = baseScale * (0.85 + Math.random() * 0.3);
-        sprite.scale.set(randomScale);
-        
-        // 2. 圆形遮罩
-        const mask = new PIXI.Graphics();
-        mask.beginFill(0xffffff);
-        mask.drawCircle(0, 0, (texture.width * randomScale) / 2);
-        mask.endFill();
-        container.addChild(mask);
-        sprite.mask = mask;
-        
-        // 3. 边框（初始为普通金色）
-        const border = new PIXI.Graphics();
-        border.lineStyle(1, CONFIG.colors.gold, 0.6);
-        border.drawCircle(0, 0, (texture.width * randomScale) / 2);
-        container.addChild(sprite);
-        container.addChild(border);
-        
-        // 初始随机位置
-        container.x = Math.random() * 1920;
-        container.y = Math.random() * 1080;
-        container.alpha = 0.4 + Math.random() * 0.3;
-        
-        // 用户数据
-        container.userData = {
-            employeeId: employeeId,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4,
-            noiseOffset: Math.random() * 1000,
-            index: index,
-            type: 'avatar',
-            baseScale: randomScale,
-            signed: false,
-            border: border,  // 保存边框引用以便后续修改
-            sprite: sprite
-        };
-        
-        this.app.stage.addChild(container);
-        this.particles.push(container);
-        this.particleMap.set(employeeId, container);
-        
-        // 飞入动画
-        gsap.from(container, {
-            x: -100 + Math.random() * 200,
-            y: -100 + Math.random() * 200,
-            alpha: 0,
-            duration: 1.5,
-            ease: "power2.out",
-            delay: (index / CONFIG.totalEmployees) * 2
-        });
-    }
-    
-    /**
-     * 生成金色尘埃
-     */
-    generateDust() {
-        for (let i = 0; i < CONFIG.dustCount; i++) {
-            const dust = new PIXI.Graphics();
-            const color = CONFIG.colors.dust[Math.floor(Math.random() * CONFIG.colors.dust.length)];
-            dust.beginFill(color, 0.4);
-            dust.drawCircle(0, 0, Math.random() * 2 + 0.5);
-            dust.endFill();
-            
-            dust.x = Math.random() * 1920;
-            dust.y = Math.random() * 1080;
-            dust.alpha = 0;
-            
-            dust.userData = {
-                vx: (Math.random() - 0.5) * 2,
-                vy: (Math.random() - 0.5) * 2,
-                noiseOffset: Math.random() * 1000,
-                type: 'dust'
-            };
-            
-            this.app.stage.addChild(dust);
-            this.dust.push(dust);
-            
-            gsap.to(dust, { alpha: 0.6, duration: 2, delay: Math.random() * 3 });
+
+    async loadEmployeeData() {
+        try {
+            const res  = await fetch(CONFIG.api.employees);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (Array.isArray(data.employees) && data.employees.length > 0) {
+                this.employees = data.employees;
+                console.log(`[Data] ${this.employees.length} employees`);
+            } else throw new Error("empty");
+        } catch (e) {
+            console.warn("[Data] 使用默认列表", e);
+            this.employees = Array.from({ length: 300 }, (_, i) => `${105001 + i}`);
         }
     }
-    
-    /**
-     * 采样SUNNY文字坐标
-     */
-    calculateTextTargets() {
+
+    // ─── 离屏 canvas 采样坐标 ────────────────────
+    // draw(ctx, w, h) 负责绘图；step 是采样间隔（越小点越多）
+    samplePoints(draw, step) {
+        const screenW = window.innerWidth;
+        const screenH = window.innerHeight;
+
+        const canvasW = 1200;
+        const canvasH = Math.round(canvasW * (screenH / screenW));
+
         const canvas = document.createElement('canvas');
+        canvas.width  = canvasW;
+        canvas.height = canvasH;
         const ctx = canvas.getContext('2d');
-        canvas.width = 1920;
-        canvas.height = 1080;
-        
-        ctx.fillStyle = 'white';
-        ctx.font = `${CONFIG.fontWeight} ${CONFIG.fontSize}px ${CONFIG.fontFamily}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(CONFIG.text, 960, 540);
-        
-        const data = ctx.getImageData(0, 0, 1920, 1080).data;
+        draw(ctx, canvasW, canvasH);
+
+        const imgData = ctx.getImageData(0, 0, canvasW, canvasH).data;
+        const sx = screenW / canvasW;
+        const sy = screenH / canvasH;
+
+        const s = Math.max(1, Math.round(step));
         const points = [];
-        
-        const step = 3;
-        for (let y = 0; y < 1080; y += step) {
-            for (let x = 0; x < 1920; x += step) {
-                if (data[(y * 1920 + x) * 4 + 3] > 128) {
-                    points.push({ x, y });
+        for (let y = 0; y < canvasH; y += s) {
+            for (let x = 0; x < canvasW; x += s) {
+                if (imgData[(y * canvasW + x) * 4 + 3] > 32) {
+                    points.push({ x: x * sx, y: y * sy });
                 }
             }
         }
-        
-        // 随机打乱
+
+        // shuffle — 让分配到每个 slot 的点均匀分散
         for (let i = points.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [points[i], points[j]] = [points[j], points[i]];
         }
-        
-        this.targetPoints = points;
-        console.log(`[TextTargets] 采样到${points.length}个坐标点`);
+        return points;
     }
-    
-    /**
-     * 为每个员工分配SUNNY上的位置
-     */
-    assignPositions() {
-        this.employees.forEach((employee, index) => {
-            const targetPos = this.targetPoints[index % this.targetPoints.length];
-            this.positionMap.set(employee.id, targetPos);
-        });
-        console.log(`[AssignPositions] 已为${this.employees.length}个员工分配坐标`);
+
+    // ─── 核心：目标坐标分配 ──────────────────────
+    // 同一次采样出的点：前 avatarCount 个给头像，后面的给粒子。
+    // 点不够时循环复用（加抖动避免重叠）。
+    calculateCompositionTargets() {
+        const ac = this.employees.length;  // avatar count
+        const dc = CONFIG.dustCount;       // dust count
+        const need = ac + dc;
+
+        const logoRaw   = this.sampleLogoShape(need);
+        const sunnyRaw  = this.sampleSunnyShape(need);
+
+        this.logoAvatarTargets  = this.slice(logoRaw,  0,  ac);
+        this.logoDustTargets    = this.slice(logoRaw,  ac, ac + dc);
+        this.sunnyAvatarTargets = this.slice(sunnyRaw, 0,  ac);
+        this.sunnyDustTargets   = this.slice(sunnyRaw, ac, ac + dc);
+
+        console.log(`[Targets] logo采样=${logoRaw.length} sunny采样=${sunnyRaw.length} | 需要 avatar=${ac} dust=${dc}`);
     }
-    
-    /**
-     * 收到签名事件
-     */
-    onSignatureReceived(employeeId, timestamp) {
-        // 防止重复签名
-        if (this.signedSet.has(employeeId)) {
-            console.warn(`[Signature] 重复签名: ${employeeId}`);
-            return;
-        }
+
+    // 切片 + 不够时循环填充
+    slice(arr, start, end) {
+        const out = arr.slice(start, end);
+        const need = end - start;
+        if (out.length === 0) return Array.from({ length: need }, () => ({
+            x: window.innerWidth / 2, y: window.innerHeight / 2
+        }));
         
-        // 检查员工是否存在
-        if (!this.particleMap.has(employeeId)) {
-            console.warn(`[Signature] 未找到员工: ${employeeId}`);
-            return;
-        }
-        
-        console.log(`[Signature] ✓ ${employeeId} 已签名`);
-        
-        // 加入队列
-        this.signatureQueue.push({
-            employeeId,
-            timestamp: timestamp || Date.now()
-        });
-        
-        // 标记已签名
-        this.signedSet.add(employeeId);
-        
-        // 更新进度
-        this.updateSignatureProgress();
-        
-        // 处理队列
-        this.processSignatureQueue();
-    }
-    
-    /**
-     * 处理签名队列（带延迟以避免动画重叠）
-     */
-    processSignatureQueue() {
-        if (this.isProcessingSignature || this.signatureQueue.length === 0) {
-            return;
-        }
-        
-        this.isProcessingSignature = true;
-        const { employeeId } = this.signatureQueue.shift();
-        
-        this.animateSignature(employeeId, () => {
-            this.isProcessingSignature = false;
-            
-            // 继续处理下一个
-            if (this.signatureQueue.length > 0) {
-                setTimeout(() => this.processSignatureQueue(), CONFIG.animation.queueDelay);
-            }
-            
-            // 检查是否全部完成
-            if (this.signedSet.size === CONFIG.totalEmployees) {
-                this.onAllSignaturesComplete();
-            }
-        });
-    }
-    
-    /**
-     * 签名动画：放大 -> 飞向目标位置
-     */
-    animateSignature(employeeId, onComplete) {
-        const particle = this.particleMap.get(employeeId);
-        const targetPos = this.positionMap.get(employeeId);
-        
-        if (!particle || !targetPos) {
-            onComplete();
-            return;
-        }
-        
-        particle.userData.signed = true;
-        
-        // 1. 高亮放大效果
-        const timeline = gsap.timeline({
-            onComplete: onComplete
-        });
-        
-        // 边框变色加粗
-        particle.userData.border.clear();
-        particle.userData.border.lineStyle(3, CONFIG.colors.highlight, 1);
-        particle.userData.border.drawCircle(0, 0, (particle.userData.sprite.width) / 2);
-        
-        timeline
-            // 阶段1: 放大高亮
-            .to(particle.scale, {
-                x: particle.userData.baseScale * 1.8,
-                y: particle.userData.baseScale * 1.8,
-                duration: CONFIG.animation.signatureHighlight,
-                ease: "back.out(2)"
-            })
-            .to(particle, {
-                alpha: 1,
-                duration: CONFIG.animation.signatureHighlight * 0.5
-            }, "<")
-            
-            // 阶段2: 飞向目标位置
-            .to(particle, {
-                x: targetPos.x,
-                y: targetPos.y,
-                duration: CONFIG.animation.flyToPosition,
-                ease: "power2.inOut"
-            }, "+=0.2")
-            .to(particle.scale, {
-                x: particle.userData.baseScale * 0.9,
-                y: particle.userData.baseScale * 0.9,
-                duration: CONFIG.animation.flyToPosition,
-                ease: "power2.inOut"
-            }, "<")
-            
-            // 阶段3: 落位后边框变为已签名样式
-            .call(() => {
-                particle.userData.border.clear();
-                particle.userData.border.lineStyle(2, CONFIG.colors.signed, 0.9);
-                particle.userData.border.drawCircle(0, 0, (particle.userData.sprite.width) / 2);
-                
-                // 停止流场影响
-                particle.userData.vx = 0;
-                particle.userData.vy = 0;
-            });
-    }
-    
-    /**
-     * 每帧更新（仅对未签名的粒子应用流场）
-     */
-    update(delta) {
-        if (this.isAllSigned) return;
-        
-        const time = Date.now() * 0.001;
-        
-        // 只对未签名的粒子应用流场
-        this.particles.forEach(p => {
-            if (p.userData.signed) return;
-            
-            const ud = p.userData;
-            const angle = Noise.perlin2(
-                p.x * CONFIG.noiseScale, 
-                p.y * CONFIG.noiseScale + time
-            ) * Math.PI * 4;
-            
-            const fx = Math.cos(angle) * CONFIG.flowSpeed;
-            const fy = Math.sin(angle) * CONFIG.flowSpeed;
-            
-            ud.vx += fx;
-            ud.vy += fy;
-            ud.vx *= 0.98;
-            ud.vy *= 0.98;
-            
-            p.x += ud.vx * delta;
-            p.y += ud.vy * delta;
-            
-            // 边界
-            if (p.x < 0 || p.x > 1920) ud.vx *= -1;
-            if (p.y < 0 || p.y > 1080) ud.vy *= -1;
-            
-            // 鼠标避让
-            if (this.mouse.active) {
-                const dx = p.x - this.mouse.x;
-                const dy = p.y - this.mouse.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 120) {
-                    const force = (120 - dist) / 120;
-                    ud.vx += (dx / dist) * force * 3;
-                    ud.vy += (dy / dist) * force * 3;
-                }
-            }
-        });
-        
-        // 尘埃始终流动
-        this.dust.forEach(d => {
-            const ud = d.userData;
-            const angle = Noise.perlin2(
-                d.x * CONFIG.noiseScale * 0.5, 
-                d.y * CONFIG.noiseScale * 0.5 + time
-            ) * Math.PI * 2;
-            
-            ud.vx += Math.cos(angle) * 0.03;
-            ud.vy += Math.sin(angle) * 0.03;
-            ud.vx *= 0.95;
-            ud.vy *= 0.95;
-            
-            d.x += ud.vx;
-            d.y += ud.vy;
-            
-            if (d.x < 0 || d.x > 1920) ud.vx *= -1;
-            if (d.y < 0 || d.y > 1080) ud.vy *= -1;
-        });
-    }
-    
-    /**
-     * 所有签名完成
-     */
-    onAllSignaturesComplete() {
-        this.isAllSigned = true;
-        console.log("[SignatureWall] 🎉 所有员工已签名！");
-        
-        // 显示完成提示
-        const completeEl = document.getElementById('complete-message');
-        if (completeEl) {
-            completeEl.style.display = 'block';
-            gsap.from(completeEl, {
-                scale: 0.5,
-                opacity: 0,
-                duration: 1,
-                ease: "back.out(2)"
-            });
-        }
-        
-        // 所有已签名粒子的边框闪烁
-        this.particles.forEach(p => {
-            if (p.userData.signed) {
-                gsap.to(p.userData.border, {
-                    alpha: 0.3,
-                    duration: 0.5,
-                    repeat: 3,
-                    yoyo: true
+        // 优化兜底：如果点不够，在整个范围内随机取点（插值），避免简单的原点偏移造成重影
+        if (out.length < need) {
+             // 计算包围盒
+             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+             out.forEach(p => {
+                 if (p.x < minX) minX = p.x;
+                 if (p.x > maxX) maxX = p.x;
+                 if (p.y < minY) minY = p.y;
+                 if (p.y > maxY) maxY = p.y;
+             });
+             const w = maxX - minX;
+             const h = maxY - minY;
+
+             while (out.length < need) {
+                // 随机插值：取两个点中间的位置 + 扰动
+                const p1 = out[Math.floor(Math.random() * out.length)];
+                const p2 = out[Math.floor(Math.random() * out.length)];
+                out.push({
+                    x: (p1.x + p2.x) * 0.5 + (Math.random() - 0.5) * 5,
+                    y: (p1.y + p2.y) * 0.5 + (Math.random() - 0.5) * 5
                 });
+             }
+        }
+        return out;
+    }
+
+    sampleLogoShape(need) {
+        // step 选择：需要的点越多，step 越小
+        // 1200×675 canvas，step=1 → 最多 ~81万点（远超需求）
+        // step=2 → ~20万点，足够
+        const step = 1;
+        if (this.logoImage) {
+            return this.samplePoints((ctx, w, h) => {
+                ctx.clearRect(0, 0, w, h);
+                const margin = 0.10;
+                const maxW   = w * (1 - margin * 2);
+                const maxH   = h * (1 - margin * 2);
+                const img    = this.logoImage;
+                const sc     = Math.min(maxW / img.width, maxH / img.height);
+                ctx.drawImage(img,
+                    (w - img.width * sc) / 2,
+                    (h - img.height * sc) / 2,
+                    img.width * sc, img.height * sc
+                );
+            }, step);
+        }
+        // 无 logo 图片时用文字
+        return this.samplePoints((ctx, w, h) => {
+            ctx.clearRect(0, 0, w, h);
+            ctx.font      = `${CONFIG.fontWeight} ${Math.min(w / 5, 300)}px ${CONFIG.fontFamily}`;
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('LOGO', w / 2, h / 2);
+        }, step);
+    }
+
+    sampleSunnyShape(need) {
+        return this.samplePoints((ctx, w, h) => {
+            ctx.clearRect(0, 0, w, h);
+            ctx.font      = `${CONFIG.fontWeight} ${Math.min(w / 4.2, 380)}px ${CONFIG.fontFamily}`;
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(CONFIG.sunnyText, w / 2, h / 2);
+        }, 1);
+    }
+
+    // ─── 层 ───────────────────────────────────
+    createLayers() {
+        this.layers.dust   = new PIXI.Container();
+        this.layers.avatar = new PIXI.Container();
+        this.layers.active = new PIXI.Container();
+        this.app.stage.sortableChildren = true;
+        this.layers.dust.zIndex   = 0;
+        this.layers.avatar.zIndex = 1;
+        this.layers.active.zIndex = 2;
+        this.app.stage.addChild(this.layers.dust);
+        this.app.stage.addChild(this.layers.avatar);
+        this.app.stage.addChild(this.layers.active);
+    }
+
+    initEvents() {
+        window.addEventListener('resize', (e) => {
+            if (this.resizeTimer) clearTimeout(this.resizeTimer);
+            this.resizeTimer = setTimeout(() => this.handleResize(), 200);
+        });
+    }
+
+    // 屏幕外随机起始点
+    _randomEdgePoint() {
+        const w = window.innerWidth, h = window.innerHeight;
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.max(w, h) * (0.6 + Math.random() * 0.5);
+        return { x: w / 2 + Math.cos(a) * r, y: h / 2 + Math.sin(a) * r };
+    }
+
+    // ─── 创建头像并飞入 Logo ────────────────────
+    async createAvatars() {
+        const total = this.employees.length;
+        let nextIdx = 0;
+
+        const worker = async () => {
+            while (true) {
+                const i = nextIdx++;
+                if (i >= total) return;
+                const id  = this.employees[i];
+                let tex = null;
+                try { tex = await PIXI.Assets.load(`${CONFIG.imagesFolder}${id}${CONFIG.imageExtension}`); } catch {}
+                if (!tex) tex = this._makePlaceholder();
+
+                const g     = new PIXI.Graphics();
+                const start = this._randomEdgePoint();
+                g.x = start.x; g.y = start.y;
+                g.userData = {
+                    id, index: i, state: 'INTRO',
+                    vx: 0, vy: 0, baseScale: 1,
+                    noiseOffset: Math.random() * 1000,
+                    texture: tex,
+                    targetSize: CONFIG.avatarSize,
+                    border: { width: 2, color: CONFIG.colors.gold, alpha: 1 }
+                };
+                this.redrawAvatarGraphic(g);
+                this.layers.avatar.addChild(g);
+                this.particles.set(id, g);
+
+                // 飞入 Logo 目标
+                this.introAvatarRemaining++;
+                this._flyAvatarToLogo(g, i);
+
+                if (i % 50 === 0) console.log(`[Avatar] ${i + 1}/${total}`);
             }
-        });
-        
-        // 尘埃汇聚
-        this.dust.forEach((d, i) => {
-            const target = this.targetPoints[(CONFIG.totalEmployees + i) % this.targetPoints.length];
-            gsap.to(d, {
-                x: target.x,
-                y: target.y,
-                alpha: 0.8,
-                duration: 3,
-                ease: "power2.inOut",
-                delay: Math.random() * 2
-            });
-        });
+        };
+        await Promise.all(Array.from({ length: 10 }, () => worker()));
     }
-    
-    /**
-     * 更新加载进度
-     */
-    updateProgress() {
-        const percent = (this.loadedCount / CONFIG.totalEmployees) * 100;
-        const fill = document.getElementById('progress-fill');
-        if (fill) {
-            fill.style.width = `${percent}%`;
-        }
-        
-        const text = document.getElementById('loader-text');
-        if (text) {
-            text.textContent = `加载中 ${this.loadedCount}/${CONFIG.totalEmployees}`;
-        }
-    }
-    
-    /**
-     * 更新签名进度
-     */
-    updateSignatureProgress() {
-        const signedCount = this.signedSet.size;
-        const percent = (signedCount / CONFIG.totalEmployees) * 100;
-        
-        const progressEl = document.getElementById('signature-progress');
-        if (progressEl) {
-            progressEl.textContent = `已签名: ${signedCount}/${CONFIG.totalEmployees}`;
-        }
-        
-        const barEl = document.getElementById('signature-fill');
-        if (barEl) {
-            barEl.style.width = `${percent}%`;
-        }
-    }
-    
-    /**
-     * 所有头像加载完成
-     */
-    onAllLoaded() {
-        console.log("[SignatureWall] 所有头像加载完成");
-        
-        gsap.to("#loader", {
-            opacity: 0,
-            duration: 1,
-            delay: 1,
+
+    _flyAvatarToLogo(g, index) {
+        const target = this.logoAvatarTargets[index];
+        if (!target) { g.userData.state = 'IDLE'; this.introAvatarRemaining--; return; }
+
+        const delay = index * 0.005;
+        gsap.fromTo(g,      { alpha: 0 }, { alpha: 1, duration: 0.3, delay, ease: 'power2.out' });
+        gsap.fromTo(g.scale, { x: 0.1, y: 0.1 }, { x: 1, y: 1, duration: 0.7, delay, ease: 'expo.out' });
+        gsap.to(g, {
+            x: target.x, y: target.y, duration: 1.7, delay, ease: 'expo.out',
             onComplete: () => {
-                document.getElementById('loader').style.display = 'none';
+                g.userData.state = 'IDLE';
+                g.userData.vx = (Math.random() - 0.5) * 1.5;
+                g.userData.vy = (Math.random() - 0.5) * 1.5;
+                this.introAvatarRemaining--;
+                this._tryFinishIntro();
             }
         });
-        
-        // 显示签名进度条
-        const progressContainer = document.getElementById('signature-progress-container');
-        if (progressContainer) {
-            progressContainer.style.display = 'flex';
-            gsap.from(progressContainer, {
-                opacity: 0,
-                y: -20,
-                duration: 1,
-                delay: 1.5
+    }
+
+    // ─── 创建粒子并飞入 Logo ────────────────────
+    createDust() {
+        const count = CONFIG.dustCount;
+        const container = new PIXI.ParticleContainer(count, { position: true, scale: true, alpha: true });
+        this.layers.dust.addChild(container);
+
+        // 粒子纹理（半径 3px 的金色圆）
+        const g = new PIXI.Graphics();
+        g.beginFill(0xFFD700, 1);
+        g.drawCircle(3, 3, 3);
+        g.endFill();
+        const tex = this.app.renderer.generateTexture(g);
+
+        for (let i = 0; i < count; i++) {
+            const sp = new PIXI.Sprite(tex);
+            sp.anchor.set(0.5);
+            const start = this._randomEdgePoint();
+            sp.x = start.x; sp.y = start.y;
+            sp.userData = {
+                vx: 0, vy: 0,
+                noiseOffset: Math.random() * 1000
+            };
+            sp.alpha = 0.55 + Math.random() * 0.45;
+            sp.scale.set(0.7 + Math.random() * 1.0);
+            container.addChild(sp);
+            this.dustParticles.push(sp);
+
+            // 飞入 Logo 目标
+            this.introDustRemaining++;
+            this._flyDustToLogo(sp, i);
+        }
+    }
+
+    _flyDustToLogo(sp, index) {
+        const target = this.logoDustTargets[index];
+        if (!target) { this.introDustRemaining--; return; }
+
+        // 粒子比头像晚开始飞入，让头像先到位形成骨架，粒子再填充
+        const delay = 1.6 + index * 0.0003;
+
+        gsap.fromTo(sp, { alpha: 0 }, { alpha: 0.55 + Math.random() * 0.45, duration: 0.35, delay, ease: 'power2.out' });
+        gsap.to(sp, {
+            x: target.x, y: target.y, duration: 2.0, delay, ease: 'expo.out',
+            onComplete: () => {
+                sp.userData.vx = (Math.random() - 0.5) * 0.8;
+                sp.userData.vy = (Math.random() - 0.5) * 0.8;
+                this.introDustRemaining--;
+                this._tryFinishIntro();
+            }
+        });
+    }
+
+    // 头像和粒子都到位后才切换
+    _tryFinishIntro() {
+        if (this.phase !== 'INTRO_TO_LOGO') return;
+        if (this.introAvatarRemaining <= 0 && this.introDustRemaining <= 0) {
+            gsap.delayedCall(0.7, () => {
+                if (this.phase !== 'INTRO_TO_LOGO') return;
+                console.log('[Phase] → EXPLODING');
+                this.explodeToSpace();
             });
         }
     }
-    
-    /**
-     * 创建占位符纹理
-     */
-    createPlaceholderTexture(employeeId) {
+
+    // ─── 爆炸散开（星空效果） ──────────────────
+    explodeToSpace() {
+        this.phase = 'EXPLODING';
+        
+        const allParticles = [...this.particles.values(), ...this.dustParticles];
+        let completedCount = 0;
+        const total = allParticles.length;
+
+        allParticles.forEach((p, i) => {
+            // 随机全屏目标点
+            const tx = Math.random() * window.innerWidth;
+            const ty = Math.random() * window.innerHeight;
+
+            gsap.to(p, {
+                x: tx,
+                y: ty,
+                duration: 1.5 + Math.random() * 1.0, // 1.5~2.5s
+                ease: "expo.out",
+                delay: Math.random() * 0.3, // 稍微错开
+                onComplete: () => {
+                    // 恢复随机初速度，衔接流场
+                    p.userData.vx = (Math.random() - 0.5) * 2;
+                    p.userData.vy = (Math.random() - 0.5) * 2;
+                    
+                    completedCount++;
+                    if (completedCount >= total) {
+                        this.phase = 'FREE_FLOAT';
+                        console.log('[Phase] → FREE_FLOAT');
+                        this.scheduler.process();
+                    }
+                }
+            });
+        });
+    }
+
+    _makePlaceholder() {
         const g = new PIXI.Graphics();
         g.beginFill(CONFIG.colors.gold);
-        g.drawCircle(25, 25, 25);
+        g.drawCircle(50, 50, 50);
         g.endFill();
-        
-        // 添加文字
-        const text = new PIXI.Text(employeeId.slice(-3), {
-            fontSize: 12,
-            fill: 0x000000,
-            fontWeight: 'bold'
-        });
-        text.anchor.set(0.5);
-        text.x = 25;
-        text.y = 25;
-        g.addChild(text);
-        
         return this.app.renderer.generateTexture(g);
     }
-    
-    /**
-     * 销毁
-     */
-    destroy() {
-        if (this.signatureListener) {
-            this.signatureListener.disconnect();
+
+    // ─── 帧更新 ───────────────────────────────
+    update(delta) {
+        if (this.phase !== 'FREE_FLOAT') return;
+        const time = Date.now() * 0.001;
+
+        this.particles.forEach(p => {
+            const s = p.userData.state;
+            if (s === 'IDLE' || s === 'SIGNED') {
+                this.applyFlowField(p, time, 1.0, delta);
+            }
+        });
+        this.dustParticles.forEach(p => {
+            this.applyFlowField(p, time, 0.5, delta);
+        });
+    }
+
+    applyFlowField(p, time, speedMul, delta) {
+        const ud = p.userData;
+
+        const ns = CONFIG.noiseScale;
+        const tt = time * CONFIG.flowTimeScale;
+        const o = ud.noiseOffset * 0.01;
+        const x = p.x * ns + o;
+        const y = p.y * ns + o;
+        const e = CONFIG.flowEps;
+
+        const nx1 = Noise.perlin2(x + e, y + tt);
+        const nx2 = Noise.perlin2(x - e, y + tt);
+        const ny1 = Noise.perlin2(x, y + e + tt);
+        const ny2 = Noise.perlin2(x, y - e + tt);
+
+        const gx = (nx1 - nx2) / (2 * e);
+        const gy = (ny1 - ny2) / (2 * e);
+
+        const fx = -gy * CONFIG.flowStrength * speedMul;
+        const fy = gx * CONFIG.flowStrength * speedMul;
+
+        ud.vx += fx * delta;
+        ud.vy += fy * delta;
+
+        const jitter = CONFIG.flowJitter * speedMul;
+        ud.vx += (Math.random() - 0.5) * jitter * delta;
+        ud.vy += (Math.random() - 0.5) * jitter * delta;
+
+        const fr = Math.pow(CONFIG.flowFriction, delta);
+        ud.vx *= fr;
+        ud.vy *= fr;
+
+        const maxSpeed = CONFIG.flowMaxSpeed * speedMul;
+        const sp2 = ud.vx * ud.vx + ud.vy * ud.vy;
+        const ms2 = maxSpeed * maxSpeed;
+        if (sp2 > ms2) {
+            const s = Math.sqrt(sp2);
+            const r = maxSpeed / s;
+            ud.vx *= r;
+            ud.vy *= r;
         }
-        if (this.app) {
-            this.app.destroy(true);
+
+        p.x += ud.vx * delta;
+        p.y += ud.vy * delta;
+
+        const w = window.innerWidth, h = window.innerHeight;
+        const m = CONFIG.flowWrapMargin;
+        if (p.x < -m) p.x = w + m;
+        else if (p.x > w + m) p.x = -m;
+        if (p.y < -m) p.y = h + m;
+        else if (p.y > h + m) p.y = -m;
+    }
+
+    // ─── 签名动画 ─────────────────────────────
+    animateSignature(id, duration, onComplete) {
+        console.log('触发签名动画:', id); // 添加日志
+        if (this.phase !== 'FREE_FLOAT' || this.isConverged) { onComplete(); return; }
+        const p = this.particles.get(id);
+        if (!p || this.signedIds.has(id)) { onComplete(); return; }
+
+        p.userData.state = 'SIGNING';
+
+        // 提到 active 层
+        const gp = p.getGlobalPosition();
+        this.layers.active.addChild(p);
+        p.position.set(gp.x, gp.y);
+
+        const bs = p.userData.baseScale;
+        this.redrawAvatarGraphic(p, { width: 3, color: CONFIG.colors.highlight, alpha: 1 });
+
+        gsap.timeline({
+            onComplete: () => {
+                this.signedIds.add(id);
+                p.userData.state = 'SIGNED';
+                p.scale.set(bs * 1.3); // 签完保持稍大
+                this.redrawAvatarGraphic(p, { width: 3, color: CONFIG.colors.signed, alpha: 1.0 });
+
+                // 放回 avatar 层
+                const gp2 = p.getGlobalPosition();
+                this.layers.avatar.addChild(p);
+                p.position.set(gp2.x, gp2.y);
+
+                if (this.signedIds.size >= this.employees.length) this.forceConverge();
+                onComplete();
+            }
+        })
+        .to(p.scale, { x: bs * 3.0, y: bs * 3.0, duration: 0.35, ease: "back.out(1.7)" })
+        .to(p.scale, { x: bs * 1.3, y: bs * 1.3, duration: 0.25, ease: "power2.out"   })
+        .to({}, { duration: duration });
+    }
+
+    // ─── WebSocket ────────────────────────────
+    connectSocket() {
+        try {
+            const ws = new WebSocket(CONFIG.api.socket);
+            ws.onopen = () => {
+                console.log('[WS] 连接成功');
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const d = JSON.parse(ev.data);
+                    console.log('[WS] 收到消息:', d); // 添加日志
+                    if (d.employeeId) {
+                        this.scheduler.push(d.employeeId);
+                    } else if (d.type === 'reset') {
+                        this.resetWall();
+                    } else if (d.type === 'converge') {
+                        this.forceConverge();
+                    }
+                } catch (error) {
+                    console.error('[WS] 消息解析错误:', error);
+                }
+            };
+            ws.onerror = (error) => {
+                console.error('[WS] 连接错误:', error);
+            };
+            ws.onclose = () => {
+                console.log('[WS] 连接关闭，尝试重连...');
+                setTimeout(() => this.connectSocket(), 3000);
+            };
+            this.socket = ws;
+        } catch (error) {
+            console.error('[WS] 无法连接:', error);
+            setTimeout(() => this.connectSocket(), 3000);
+        }
+    }
+
+    // ─── 重置 ─────────────────────────────────
+    resetWall() {
+        this.isConverged = false;
+        this.scheduler.isConverging = false;
+        this.scheduler.queue.length = 0;
+        this.scheduler.processing.clear();
+        this.signedIds.clear();
+        this.phase = 'INTRO_TO_LOGO';
+        this.introAvatarRemaining = 0;
+        this.introDustRemaining   = 0;
+
+        // 头像重新从外侧飞入
+        this.particles.forEach((p) => {
+            gsap.killTweensOf(p); gsap.killTweensOf(p.scale);
+            p.userData.state = 'INTRO'; p.scale.set(1);
+            const s = this._randomEdgePoint();
+            p.x = s.x; p.y = s.y; p.userData.vx = 0; p.userData.vy = 0;
+            this.redrawAvatarGraphic(p, { width: 2, color: CONFIG.colors.gold, alpha: 1 });
+            this.layers.avatar.addChild(p);
+            this.introAvatarRemaining++;
+            this._flyAvatarToLogo(p, p.userData.index);
+        });
+
+        // 粒子也重新飞入
+        this.dustParticles.forEach((p, i) => {
+            gsap.killTweensOf(p);
+            const s = this._randomEdgePoint();
+            p.x = s.x; p.y = s.y; p.userData.vx = 0; p.userData.vy = 0;
+            this.introDustRemaining++;
+            this._flyDustToLogo(p, i);
+        });
+    }
+
+    // ─── 汇聚为 SUNNY ─────────────────────────
+    forceConverge() {
+        if (this.isConverged) return;
+        this.isConverged = true;
+        this.scheduler.isConverging = true;
+        this.phase = 'CONVERGE_TO_SUNNY';
+        console.log("🚀 → CONVERGE_TO_SUNNY");
+        this.calculateCompositionTargets();
+
+        // 头像飞向 SUNNY
+        this.particles.forEach((p) => {
+            gsap.killTweensOf(p); gsap.killTweensOf(p.scale);
+            p.scale.set(p.userData.baseScale);
+            const t = this.sunnyAvatarTargets[p.userData.index];
+            if (!t) return;
+            gsap.to(p, { x: t.x, y: t.y, duration: 2.2, ease: "power2.inOut", delay: Math.random() * 0.8 });
+            p.userData.state = 'CONVERGED';
+            const signed = this.signedIds.has(p.userData.id);
+            this.redrawAvatarGraphic(p, {
+                width: signed ? 2   : 1.5,
+                color: signed ? CONFIG.colors.signed : CONFIG.colors.gold,
+                alpha: signed ? 0.9 : 0.7
+            });
+        });
+
+        // 粒子飞向 SUNNY
+        this.dustParticles.forEach((p, i) => {
+            gsap.killTweensOf(p);
+            const t = this.sunnyDustTargets[i];
+            if (!t) return;
+            gsap.to(p, {
+                x: t.x, y: t.y,
+                alpha: 0.6 + Math.random() * 0.4,
+                duration: 2.8, ease: "power2.inOut",
+                delay: Math.random() * 1.2
+            });
+        });
+    }
+
+    // ─── Resize ───────────────────────────────
+    handleResize() {
+        this.resizeTimer = null;
+        this.app.renderer.resize(window.innerWidth, window.innerHeight);
+        this.calculateCompositionTargets();
+
+        // 已汇聚状态下直接吸到新坐标
+        if (this.isConverged) {
+            this.particles.forEach(p => {
+                const t = this.sunnyAvatarTargets[p.userData.index];
+                if (t) { p.x = t.x; p.y = t.y; }
+            });
+            this.dustParticles.forEach((p, i) => {
+                const t = this.sunnyDustTargets[i];
+                if (t) { p.x = t.x; p.y = t.y; }
+            });
         }
     }
 }
 
-// 启动应用
-window.onload = () => {
-    window.signatureWall = new SignatureWall();
-};
+window.onload = () => { window.wall = new SignatureWall(); };

@@ -14,6 +14,9 @@ const WebSocket = require('ws')
 const cors = require('cors')
 const http = require('http')
 
+const path = require('path')
+const fs = require('fs')
+
 const app = express()
 const server = http.createServer(app)
 const wss = new WebSocket.Server({ server, path: '/signatures' })
@@ -21,7 +24,15 @@ const wss = new WebSocket.Server({ server, path: '/signatures' })
 // 中间件
 app.use(cors())
 app.use(express.json())
-app.use(express.static('public')) // 如果你想托管静态文件
+app.use(express.static(__dirname)) // 托管当前目录下的静态文件
+
+app.get('/logo.png', (req, res) => {
+  const logoPath = path.join(__dirname, '..', 'logo.png')
+  if (!fs.existsSync(logoPath)) {
+    return res.status(404).end()
+  }
+  return res.sendFile(logoPath)
+})
 
 // 签名数据存储
 const signatures = []
@@ -175,7 +186,18 @@ app.post('/api/signatures/reset', (req, res) => {
   })
 
   res.json({ success: true, message: '已重置所有签名' })
-  console.log('[API] 签名数据已重置')
+  console.log(`[API] 签名数据已重置`)
+})
+
+// 强制归位指令（大会结束时调用）
+app.post('/api/control/converge', (req, res) => {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'converge' }))
+    }
+  })
+  console.log('[Control] 发送强制归位指令')
+  res.json({ success: true, message: '已发送归位指令' })
 })
 
 // 健康检查
@@ -191,13 +213,33 @@ app.get('/health', (req, res) => {
  * 测试工具：模拟随机签名
  */
 let mockInterval = null
+const enableMock = process.env.SUNNY_ENABLE_MOCK === '1' || process.env.NODE_ENV !== 'production'
 
+if (enableMock) {
 app.post('/api/test/start-mock', (req, res) => {
   if (mockInterval) {
     return res.json({ message: '模拟已在运行中' })
   }
 
-  const employeeIds = Array.from({ length: 300 }, (_, i) => `${105001 + i}`)
+  const imgDir = path.join(__dirname, 'imgs')
+  let employeeIds = []
+  try {
+    if (fs.existsSync(imgDir)) {
+      const files = fs.readdirSync(imgDir)
+      employeeIds = files
+        .filter(file => {
+          const ext = path.extname(file).toLowerCase()
+          return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)
+        })
+        .map(file => path.parse(file).name)
+    }
+  } catch (error) {
+    console.error('[Mock] 读取图片目录失败:', error)
+  }
+
+  if (employeeIds.length === 0) {
+    employeeIds = Array.from({ length: 300 }, (_, i) => `${105001 + i}`)
+  }
 
   // 随机打乱
   for (let i = employeeIds.length - 1; i > 0; i--) {
@@ -243,6 +285,41 @@ app.post('/api/test/stop-mock', (req, res) => {
     console.log('[Mock] 停止模拟签名')
   } else {
     res.json({ message: '没有正在运行的模拟' })
+  }
+})
+} else {
+  app.post('/api/test/start-mock', (req, res) => res.status(404).json({ error: 'mock disabled' }))
+  app.post('/api/test/stop-mock', (req, res) => res.status(404).json({ error: 'mock disabled' }))
+}
+
+// ... (existing code)
+
+// 获取所有员工列表（基于图片文件）
+app.get('/api/employees', (req, res) => {
+  const imgDir = path.join(__dirname, 'imgs')
+  
+  // 检查目录是否存在
+  if (!fs.existsSync(imgDir)) {
+    return res.status(404).json({ employees: [], count: 0, error: 'imgs directory not found' })
+  }
+
+  try {
+    const files = fs.readdirSync(imgDir)
+    const employees = files
+      .filter(file => {
+        const ext = path.extname(file).toLowerCase()
+        return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)
+      })
+      .map(file => path.parse(file).name) // 移除扩展名作为工号
+
+    res.json({
+      employees,
+      count: employees.length
+    })
+    console.log(`[API] 返回员工列表: ${employees.length}人`)
+  } catch (error) {
+    console.error('[API] 读取图片目录失败:', error)
+    res.status(500).json({ error: 'Failed to read images directory' })
   }
 })
 

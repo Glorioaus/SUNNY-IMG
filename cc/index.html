@@ -16,12 +16,12 @@
         }
 
         body {
-            background: linear-gradient(135deg, #0a0a0f 0%, #1a1520 50%, #0f0a10 100%);
+            background-color: #050508;
             overflow: hidden;
             font-family: 'Noto Sans SC', sans-serif;
             color: #fff;
-            width: 1920px;
-            height: 1080px;
+            width: 100vw;
+            height: 100vh;
             position: fixed;
         }
 
@@ -29,20 +29,20 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: 1920px;
-            height: 1080px;
+            width: 100%;
+            height: 100%;
             z-index: 1;
         }
 
-        /* 环境光晕 */
+        /* 环境光晕 - 增强版 */
         .ambient-glow {
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 1600px;
-            height: 1600px;
-            background: radial-gradient(circle, rgba(255, 215, 0, 0.08) 0%, rgba(255, 165, 0, 0.03) 40%, transparent 70%);
+            width: 80vmax;
+            height: 80vmax;
+            background: radial-gradient(circle, rgba(255, 215, 0, 0.06) 0%, rgba(255, 100, 0, 0.02) 60%, transparent 80%);
             pointer-events: none;
             z-index: 0;
             animation: glow-pulse 8s ease-in-out infinite;
@@ -68,7 +68,7 @@
         }
 
         .loader-logo {
-            font-size: 120px;
+            font-size: 8vw; /* 响应式字体 */
             font-weight: 900;
             font-family: 'Montserrat', sans-serif;
             letter-spacing: 0.15em;
@@ -94,7 +94,7 @@
         }
 
         .progress-bar {
-            width: 400px;
+            width: 300px;
             height: 3px;
             background: rgba(255, 215, 0, 0.15);
             position: relative;
@@ -135,7 +135,7 @@
         }
 
         .signature-bar {
-            width: 600px;
+            width: 40vw;
             height: 6px;
             background: rgba(255, 215, 0, 0.2);
             position: relative;
@@ -185,7 +185,7 @@
         }
 
         .complete-title {
-            font-size: 80px;
+            font-size: 8vw;
             font-weight: 900;
             font-family: 'Montserrat', sans-serif;
             letter-spacing: 0.2em;
@@ -209,7 +209,7 @@
             letter-spacing: 0.3em;
         }
 
-        /* 噪点纹理 */
+        /* 噪点纹理 - 增强版 */
         .noise {
             position: fixed;
             top: 0;
@@ -218,8 +218,8 @@
             height: 100%;
             pointer-events: none;
             z-index: 20;
-            opacity: 0.04;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            opacity: 0.06;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
         }
 
         /* 顶部装饰条 */
@@ -259,23 +259,6 @@
             color: #FFD700;
             text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
         }
-
-        /* 响应式提示（实际场景不需要，仅开发用） */
-        @media screen and (max-width: 1919px) {
-            body::before {
-                content: "⚠️ 请在1920×1080分辨率下使用";
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: rgba(255, 0, 0, 0.8);
-                color: white;
-                padding: 20px 40px;
-                border-radius: 10px;
-                z-index: 1000;
-                font-size: 18px;
-            }
-        }
     </style>
 </head>
 <body>
@@ -283,38 +266,6 @@
     <div id="app-container"></div>
     <div class="ambient-glow"></div>
     <div class="noise"></div>
-    
-    <!-- Logo区域 -->
-    <div class="logo-container">
-        <img src="./logo.png" alt="Logo" class="logo-image" onerror="this.style.display='none'">
-        <div class="company-name">SUNNY</div>
-    </div>
-
-    <!-- 加载界面 -->
-    <div id="loader">
-        <div class="loader-logo">SUNNY</div>
-        <div class="loader-text" id="loader-text">正在加载头像...</div>
-        <div class="progress-bar">
-            <div class="progress-fill" id="progress-fill"></div>
-        </div>
-    </div>
-
-    <!-- 签名进度 -->
-    <div id="signature-progress-container">
-        <div id="signature-progress">已签名: 0/300</div>
-        <div class="signature-bar">
-            <div class="signature-fill" id="signature-fill"></div>
-        </div>
-    </div>
-
-    <!-- 连接状态 -->
-    <div id="connection-status">初始化中...</div>
-
-    <!-- 完成提示 -->
-    <div id="complete-message">
-        <div class="complete-title">誓师成功</div>
-        <div class="complete-subtitle">全体成员已签名完成</div>
-    </div>
 
     <!-- PixiJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
