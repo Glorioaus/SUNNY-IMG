@@ -1,3 +1,5 @@
 backend/public/*
 cc-fonted/ghImg/*
 工号-缩略图/*
+*/node_modules/
+cc/imgs/*

@@ -14,6 +14,13 @@
 
 console.clear();
 
+// ─── 环境检测 ─────────────────────────────
+// 仅通过 URL 参数 ?mock 显式启用本地Mock环境
+// 不加参数时，即使是 localhost 也会连接本地服务器（方便 test-tool.html 测试）
+const IS_LOCAL_MOCK = window.location.search.includes('mock');
+
+console.log(`🌍 环境模式: ${IS_LOCAL_MOCK ? '本地Mock（无后端）' : '正常模式（连接后端）'}`);
+
 const CONFIG = {
     totalEmployees: 300,
 
@@ -48,10 +55,18 @@ const CONFIG = {
         highlightDuration: 0.8,
     },
 
-    api: {
-        socket:    `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/signatures`,
-        employees: "/api/employees"
-    }
+    // ★ 根据环境自动切换 API 配置
+    api: IS_LOCAL_MOCK 
+        ? {
+            // 本地Mock：不使用WebSocket，仅从本地JSON加载员工列表
+            socket: null,
+            employees: "/employee-ids.json"
+          }
+        : {
+            // 正式环境：使用WebSocket实时通信
+            socket: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/signatures`,
+            employees: "/api/employees"
+          }
 };
 
 // ─── 简易噪声 ───────────────────────────────
@@ -655,6 +670,14 @@ class SignatureWall {
 
     // ─── WebSocket ────────────────────────────
     connectSocket() {
+        // 本地Mock模式：跳过WebSocket连接
+        if (IS_LOCAL_MOCK) {
+            console.log('[Mock] 本地Mock模式，跳过WebSocket连接');
+            console.log('[Mock] 提示：可使用 test-tool.html 手动触发签名事件');
+            return;
+        }
+
+        // 正式环境：建立WebSocket连接
         try {
             const ws = new WebSocket(CONFIG.api.socket);
             ws.onopen = () => {
@@ -663,7 +686,7 @@ class SignatureWall {
             ws.onmessage = (ev) => {
                 try {
                     const d = JSON.parse(ev.data);
-                    console.log('[WS] 收到消息:', d); // 添加日志
+                    console.log('[WS] 收到消息:', d);
                     if (d.employeeId) {
                         this.scheduler.push(d.employeeId);
                     } else if (d.type === 'reset') {
