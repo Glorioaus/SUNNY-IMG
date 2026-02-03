@@ -1,267 +1,290 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SUNNY | 誓师大会签名墙</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Noto+Sans+SC:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Noto+Sans+SC:wght@400;700;900&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            user-select: none;
-        }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        user-select: none;
+      }
 
-        body {
-            background-color: #050508;
-            overflow: hidden;
-            font-family: 'Noto Sans SC', sans-serif;
-            color: #fff;
-            width: 100vw;
-            height: 100vh;
-            position: fixed;
-        }
+      body {
+        background-color: #050508;
+        overflow: hidden;
+        font-family: 'Noto Sans SC', sans-serif;
+        color: #fff;
+        width: 100vw;
+        height: 100vh;
+        position: fixed;
+      }
 
-        #app-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-        }
+      #app-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+      }
 
-        /* 环境光晕 - 增强版 */
-        .ambient-glow {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80vmax;
-            height: 80vmax;
-            background: radial-gradient(circle, rgba(255, 215, 0, 0.06) 0%, rgba(255, 100, 0, 0.02) 60%, transparent 80%);
-            pointer-events: none;
-            z-index: 0;
-            animation: glow-pulse 8s ease-in-out infinite;
-        }
+      /* 环境光晕 - 增强版 */
+      .ambient-glow {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80vmax;
+        height: 80vmax;
+        background: radial-gradient(
+          circle,
+          rgba(255, 215, 0, 0.06) 0%,
+          rgba(255, 100, 0, 0.02) 60%,
+          transparent 80%
+        );
+        pointer-events: none;
+        z-index: 0;
+        animation: glow-pulse 8s ease-in-out infinite;
+      }
 
-        @keyframes glow-pulse {
-            0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
-            50% { opacity: 0.9; transform: translate(-50%, -50%) scale(1.05); }
+      @keyframes glow-pulse {
+        0%,
+        100% {
+          opacity: 0.6;
+          transform: translate(-50%, -50%) scale(1);
         }
+        50% {
+          opacity: 0.9;
+          transform: translate(-50%, -50%) scale(1.05);
+        }
+      }
 
-        /* 加载界面 */
-        #loader {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 30px;
-        }
+      /* 加载界面 */
+      #loader {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 10;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 30px;
+      }
 
-        .loader-logo {
-            font-size: 8vw; /* 响应式字体 */
-            font-weight: 900;
-            font-family: 'Montserrat', sans-serif;
-            letter-spacing: 0.15em;
-            background: linear-gradient(90deg, #FFD700, #FFA500, #FFD700);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: shimmer 3s linear infinite;
-        }
+      .loader-logo {
+        font-size: 8vw; /* 响应式字体 */
+        font-weight: 900;
+        font-family: 'Montserrat', sans-serif;
+        letter-spacing: 0.15em;
+        background: linear-gradient(90deg, #ffd700, #ffa500, #ffd700);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: shimmer 3s linear infinite;
+      }
 
-        @keyframes shimmer {
-            0% { background-position: 0% center; }
-            100% { background-position: 200% center; }
+      @keyframes shimmer {
+        0% {
+          background-position: 0% center;
         }
+        100% {
+          background-position: 200% center;
+        }
+      }
 
-        .loader-text {
-            font-size: 14px;
-            letter-spacing: 0.4em;
-            color: rgba(255, 215, 0, 0.6);
-            text-transform: uppercase;
-            font-weight: 400;
-        }
+      .loader-text {
+        font-size: 14px;
+        letter-spacing: 0.4em;
+        color: rgba(255, 215, 0, 0.6);
+        text-transform: uppercase;
+        font-weight: 400;
+      }
 
-        .progress-bar {
-            width: 300px;
-            height: 3px;
-            background: rgba(255, 215, 0, 0.15);
-            position: relative;
-            overflow: hidden;
-            border-radius: 10px;
-        }
+      .progress-bar {
+        width: 300px;
+        height: 3px;
+        background: rgba(255, 215, 0, 0.15);
+        position: relative;
+        overflow: hidden;
+        border-radius: 10px;
+      }
 
-        .progress-fill {
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #FFD700, #FFA500);
-            transition: width 0.3s ease-out;
-            box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
-        }
+      .progress-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #ffd700, #ffa500);
+        transition: width 0.3s ease-out;
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
+      }
 
-        /* 签名进度显示 */
-        #signature-progress-container {
-            position: fixed;
-            top: 40px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 5;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
+      /* 签名进度显示 */
+      #signature-progress-container {
+        position: fixed;
+        top: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 5;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+      }
 
-        #signature-progress {
-            font-size: 28px;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-            color: #FFD700;
-            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
-        }
+      #signature-progress {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: #ffd700;
+        text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+      }
 
-        .signature-bar {
-            width: 40vw;
-            height: 6px;
-            background: rgba(255, 215, 0, 0.2);
-            position: relative;
-            overflow: hidden;
-            border-radius: 10px;
-        }
+      .signature-bar {
+        width: 40vw;
+        height: 6px;
+        background: rgba(255, 215, 0, 0.2);
+        position: relative;
+        overflow: hidden;
+        border-radius: 10px;
+      }
 
-        .signature-fill {
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #00FF00, #FFD700);
-            transition: width 0.5s ease-out;
-            box-shadow: 0 0 25px rgba(0, 255, 0, 0.8);
-        }
+      .signature-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #00ff00, #ffd700);
+        transition: width 0.5s ease-out;
+        box-shadow: 0 0 25px rgba(0, 255, 0, 0.8);
+      }
 
-        /* 连接状态 */
-        #connection-status {
-            position: fixed;
-            top: 40px;
-            right: 40px;
-            z-index: 5;
-            font-size: 12px;
-            color: rgba(255, 215, 0, 0.5);
-            letter-spacing: 0.2em;
-            text-transform: uppercase;
-            padding: 10px 20px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 215, 0, 0.3);
-            border-radius: 20px;
-        }
+      /* 连接状态 */
+      #connection-status {
+        position: fixed;
+        top: 40px;
+        right: 40px;
+        z-index: 5;
+        font-size: 12px;
+        color: rgba(255, 215, 0, 0.5);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        padding: 10px 20px;
+        background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 215, 0, 0.3);
+        border-radius: 20px;
+      }
 
-        /* 完成提示 */
-        #complete-message {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 15;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            gap: 30px;
-            text-align: center;
-        }
+      /* 完成提示 */
+      #complete-message {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 15;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 30px;
+        text-align: center;
+      }
 
-        .complete-title {
-            font-size: 8vw;
-            font-weight: 900;
-            font-family: 'Montserrat', sans-serif;
-            letter-spacing: 0.2em;
-            background: linear-gradient(135deg, #FFD700, #00FF00, #FFD700);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: complete-shimmer 2s linear infinite;
-            text-shadow: 0 0 60px rgba(255, 215, 0, 0.6);
-        }
+      .complete-title {
+        font-size: 8vw;
+        font-weight: 900;
+        font-family: 'Montserrat', sans-serif;
+        letter-spacing: 0.2em;
+        background: linear-gradient(135deg, #ffd700, #00ff00, #ffd700);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: complete-shimmer 2s linear infinite;
+        text-shadow: 0 0 60px rgba(255, 215, 0, 0.6);
+      }
 
-        @keyframes complete-shimmer {
-            0% { background-position: 0% center; }
-            100% { background-position: 200% center; }
+      @keyframes complete-shimmer {
+        0% {
+          background-position: 0% center;
         }
+        100% {
+          background-position: 200% center;
+        }
+      }
 
-        .complete-subtitle {
-            font-size: 24px;
-            color: rgba(255, 215, 0, 0.8);
-            letter-spacing: 0.3em;
-        }
+      .complete-subtitle {
+        font-size: 24px;
+        color: rgba(255, 215, 0, 0.8);
+        letter-spacing: 0.3em;
+      }
 
-        /* 噪点纹理 - 增强版 */
-        .noise {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 20;
-            opacity: 0.06;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-        }
+      /* 噪点纹理 - 增强版 */
+      .noise {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 20;
+        opacity: 0.06;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      }
 
-        /* 顶部装饰条 */
-        .top-decoration {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, #FFD700, transparent);
-            z-index: 25;
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
-        }
+      /* 顶部装饰条 */
+      .top-decoration {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, #ffd700, transparent);
+        z-index: 25;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
+      }
 
-        /* Logo区域 */
-        .logo-container {
-            position: fixed;
-            top: 40px;
-            left: 40px;
-            z-index: 5;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
+      /* Logo区域 */
+      .logo-container {
+        position: fixed;
+        top: 40px;
+        left: 40px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
 
-        .logo-image {
-            width: 60px;
-            height: 60px;
-            opacity: 0.9;
-        }
+      .logo-image {
+        width: 60px;
+        height: 60px;
+        opacity: 0.9;
+      }
 
-        .company-name {
-            font-size: 32px;
-            font-weight: 900;
-            font-family: 'Montserrat', sans-serif;
-            letter-spacing: 0.15em;
-            color: #FFD700;
-            text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
-        }
+      .company-name {
+        font-size: 32px;
+        font-weight: 900;
+        font-family: 'Montserrat', sans-serif;
+        letter-spacing: 0.15em;
+        color: #ffd700;
+        text-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="top-decoration"></div>
     <div id="app-container"></div>
     <div class="ambient-glow"></div>
@@ -271,7 +294,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
     <!-- GSAP -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    
+
+    <script src="./config.js"></script>
     <script src="./app.js"></script>
-</body>
+  </body>
 </html>
