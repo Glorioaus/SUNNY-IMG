@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -619,8 +619,8 @@
         const text = document.getElementById('batchEmployeeIds').value
         const ids = text
           .split(/[\n,]/)
-          .map(id => id.trim())
-          .filter(id => id)
+          .map((id) => id.trim())
+          .filter((id) => id)
 
         if (ids.length === 0) {
           log('请输入至少一个工号', 'error')
